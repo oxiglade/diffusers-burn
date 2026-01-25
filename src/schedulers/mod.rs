@@ -12,6 +12,7 @@ pub mod ddpm;
 pub mod dpmsolver_multistep;
 pub mod euler_ancestral_discrete;
 pub mod euler_discrete;
+pub mod pndm;
 
 pub use ddim::{DDIMScheduler, DDIMSchedulerConfig};
 pub use ddpm::{DDPMScheduler, DDPMSchedulerConfig, DDPMVarianceType};
@@ -23,6 +24,7 @@ pub use euler_ancestral_discrete::{
     EulerAncestralDiscreteScheduler, EulerAncestralDiscreteSchedulerConfig,
 };
 pub use euler_discrete::{EulerDiscreteScheduler, EulerDiscreteSchedulerConfig};
+pub use pndm::{PNDMScheduler, PNDMSchedulerConfig};
 
 /// This represents how beta ranges from its minimum value to the maximum
 /// during training.
