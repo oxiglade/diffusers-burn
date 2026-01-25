@@ -187,7 +187,7 @@ impl DownEncoderBlock2DConfig {
 }
 
 impl<B: Backend> DownEncoderBlock2D<B> {
-    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+    pub fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
         let mut xs = xs.clone();
         for resnet in self.resnets.iter() {
             xs = resnet.forward(xs, None)
@@ -259,7 +259,7 @@ impl UpDecoderBlock2DConfig {
 }
 
 impl<B: Backend> UpDecoderBlock2D<B> {
-    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+    pub fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
         let mut xs = xs.clone();
         for resnet in self.resnets.iter() {
             xs = resnet.forward(xs, None)
