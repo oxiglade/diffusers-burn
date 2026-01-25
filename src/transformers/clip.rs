@@ -368,14 +368,16 @@ mod tests {
 
         assert_eq!(text_embeddings.position_ids.shape(), Shape::from([1, 77]));
 
+        // Convert to i32 for comparison since wgpu uses I32 while other backends use I64
+        let expected: Vec<i32> = (0..77).collect();
         assert_eq!(
-            text_embeddings.position_ids.into_data(),
-            TensorData::from([[
-                0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-                22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
-                43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
-                64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76
-            ]])
+            text_embeddings
+                .position_ids
+                .into_data()
+                .convert::<i32>()
+                .to_vec::<i32>()
+                .unwrap(),
+            expected
         );
     }
 
