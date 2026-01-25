@@ -419,4 +419,88 @@ mod tests {
             Tolerance::rel_abs(1e-3, 1e-3),
         );
     }
+
+    /// Test QuickGelu activation matches diffusers-rs
+    /// QuickGelu: x * sigmoid(1.702 * x)
+    /// Reference values from diffusers-rs v0.3.1
+    #[test]
+    fn test_quick_gelu_matches_diffusers_rs() {
+        let device = Default::default();
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(
+            TensorData::from([-2.0f32, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]),
+            &device,
+        );
+
+        let result = Activation::QuickGelu.forward(xs);
+
+        // Reference values from diffusers-rs: xs * (xs * 1.702).sigmoid()
+        result.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
+                -0.064341374f32,
+                -0.15420423,
+                -0.14961156,
+                0.0,
+                0.35038844,
+                0.84579575,
+                1.9356586,
+            ]),
+            Tolerance::rel_abs(1e-4, 1e-4),
+        );
+    }
+
+    /// Test GeluErf activation matches diffusers-rs
+    /// GeluErf: 0.5 * x * (1 + erf(x / sqrt(2)))
+    /// Reference values from diffusers-rs v0.3.1
+    #[test]
+    fn test_gelu_erf_matches_diffusers_rs() {
+        let device = Default::default();
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(
+            TensorData::from([-2.0f32, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]),
+            &device,
+        );
+
+        let result = Activation::GeluErf.forward(xs);
+
+        // Reference values from diffusers-rs: (xs * (xs / sqrt(2)).erf() + 1) / 2
+        result.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
+                -0.04550028f32,
+                -0.15865526,
+                -0.15426877,
+                0.0,
+                0.34573123,
+                0.8413447,
+                1.9544997,
+            ]),
+            Tolerance::rel_abs(1e-4, 1e-4),
+        );
+    }
+
+    /// Test Gelu activation matches diffusers-rs (gelu("none"))
+    /// Reference values from diffusers-rs v0.3.1
+    #[test]
+    fn test_gelu_matches_diffusers_rs() {
+        let device = Default::default();
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(
+            TensorData::from([-2.0f32, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]),
+            &device,
+        );
+
+        let result = Activation::Gelu.forward(xs);
+
+        // Reference values from diffusers-rs: gelu("none")
+        // Note: Burn's gelu() uses the same approximation as PyTorch's gelu("none")
+        result.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
+                -0.04550028f32,
+                -0.15865526,
+                -0.15426877,
+                0.0,
+                0.34573123,
+                0.8413447,
+                1.9544997,
+            ]),
+            Tolerance::rel_abs(1e-4, 1e-4),
+        );
+    }
 }

@@ -922,4 +922,40 @@ mod tests {
 
         assert_eq!(output.shape(), Shape::new([4, 32, 64, 64]));
     }
+
+    /// Test Downsample2D avg_pool matches diffusers-rs
+    /// Reference values from diffusers-rs v0.3.1: avg_pool2d([2,2], [2,2], [0,0], false, true, None)
+    #[test]
+    fn test_downsample_2d_avg_pool_matches_diffusers_rs() {
+        let device = Default::default();
+        let tensor: Tensor<TestBackend, 4> = Tensor::from_data(
+            TensorData::from([
+                [
+                    [[0.0351f32, 0.4179], [0.0137, 0.6947]],
+                    [[0.9526, 0.5386], [0.2856, 0.1839]],
+                    [[0.3215, 0.4595], [0.6777, 0.3946]],
+                    [[0.5221, 0.4230], [0.2774, 0.1069]],
+                ],
+                [
+                    [[0.8941, 0.8696], [0.5735, 0.8750]],
+                    [[0.6718, 0.4144], [0.1038, 0.2629]],
+                    [[0.7467, 0.9415], [0.5005, 0.6309]],
+                    [[0.6534, 0.2019], [0.3670, 0.8074]],
+                ],
+            ]),
+            &device,
+        );
+
+        let downsample_2d = Downsample2DConfig::new(4, false, 4, 0).init(&device);
+        let output = downsample_2d.forward(tensor);
+
+        // Reference values from diffusers-rs: [0.29035002, 0.49017498, 0.463325, 0.33235, 0.80305, 0.363225, 0.7049, 0.507425]
+        output.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
+                [[[0.29035002f32]], [[0.49017498]], [[0.463325]], [[0.33235]]],
+                [[[0.80305]], [[0.363225]], [[0.7049]], [[0.507425]]],
+            ]),
+            Tolerance::rel_abs(1e-4, 1e-4),
+        );
+    }
 }
