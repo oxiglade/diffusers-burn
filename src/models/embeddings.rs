@@ -85,26 +85,27 @@ impl<B: Backend> Timesteps<B> {
 mod tests {
     use super::*;
     use crate::TestBackend;
-    use burn::tensor::{Data, Shape};
+    use burn::tensor::{Shape, TensorData, Tolerance};
 
     #[test]
     #[cfg(not(feature = "torch"))]
     fn test_timesteps_even_channels() {
         let device = Default::default();
         let timesteps = Timesteps::<TestBackend>::new(4, true, 0.);
-        let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4.]), &device);
+        let xs: Tensor<TestBackend, 1> =
+            Tensor::from_data(TensorData::from([1., 2., 3., 4.]), &device);
 
-        let emb = timesteps.forward(xs);
+        let emb: Tensor<TestBackend, 2> = timesteps.forward(xs);
 
         assert_eq!(emb.shape(), Shape::from([4, 4]));
-        emb.to_data().assert_approx_eq(
-            &Data::from([
+        emb.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
                 [0.5403, 1.0000, 0.8415, 0.0100],
                 [-0.4161, 0.9998, 0.9093, 0.0200],
                 [-0.9900, 0.9996, 0.1411, 0.0300],
                 [-0.6536, 0.9992, -0.7568, 0.0400],
             ]),
-            3,
+            Tolerance::rel_abs(1e-3, 1e-3),
         );
     }
 
@@ -114,13 +115,13 @@ mod tests {
         let device = Default::default();
         let timesteps = Timesteps::<TestBackend>::new(5, true, 0.);
         let xs: Tensor<TestBackend, 1> =
-            Tensor::from_data(Data::from([1., 2., 3., 4., 5.]), &device);
+            Tensor::from_data(TensorData::from([1., 2., 3., 4., 5.]), &device);
 
-        let emb = timesteps.forward(xs);
+        let emb: Tensor<TestBackend, 2> = timesteps.forward(xs);
 
         assert_eq!(emb.shape(), Shape::from([6, 4]));
-        emb.to_data().assert_approx_eq(
-            &Data::from([
+        emb.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
                 [0.5403, 1.0000, 0.8415, 0.0100],
                 [-0.4161, 0.9998, 0.9093, 0.0200],
                 [-0.9900, 0.9996, 0.1411, 0.0300],
@@ -128,7 +129,7 @@ mod tests {
                 [0.2837, 0.9988, -0.9589, 0.0500],
                 [0.0000, 0.0000, 0.0000, 0.0000],
             ]),
-            3,
+            Tolerance::rel_abs(1e-3, 1e-3),
         );
     }
 }

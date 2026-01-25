@@ -357,7 +357,7 @@ impl<B: Backend> ClipTextTransformer<B> {
 mod tests {
     use super::*;
     use crate::TestBackend;
-    use burn::tensor::{Data, Shape};
+    use burn::tensor::{Shape, TensorData, Tolerance};
 
     #[test]
     fn test_init_text_embeddings() {
@@ -366,17 +366,17 @@ mod tests {
         let text_embeddings: ClipTextEmbeddings<TestBackend> =
             clip_config.init_text_embeddings(&device);
 
+        assert_eq!(text_embeddings.position_ids.shape(), Shape::from([1, 77]));
+
         assert_eq!(
-            text_embeddings.position_ids.to_data(),
-            Data::from([[
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-                44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
-                65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76
+            text_embeddings.position_ids.into_data(),
+            TensorData::from([[
+                0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+                22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
+                43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+                64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76
             ]])
         );
-
-        assert_eq!(text_embeddings.position_ids.shape(), Shape::from([1, 77]));
     }
 
     #[test]
@@ -399,8 +399,8 @@ mod tests {
             ClipTextTransformer::generate_causal_attention_mask(2, 4, &device);
         assert_eq!(mask.shape(), Shape::from([2, 1, 4, 4]));
 
-        mask.to_data().assert_approx_eq(
-            &Data::from([
+        mask.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
                 [[
                     [0.0000e0, f32::MIN, f32::MIN, f32::MIN],
                     [0.0000e0, 0.0000e0, f32::MIN, f32::MIN],
@@ -414,7 +414,7 @@ mod tests {
                     [0.0000e0, 0.0000e0, 0.0000e0, 0.0000e0],
                 ]],
             ]),
-            3,
+            Tolerance::rel_abs(1e-3, 1e-3),
         );
     }
 }
