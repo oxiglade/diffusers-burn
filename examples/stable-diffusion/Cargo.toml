@@ -1,0 +1,25 @@
+[package]
+name = "stable-diffusion-example"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "stable-diffusion"
+path = "main.rs"
+
+[features]
+default = ["wgpu"]
+torch = ["diffusers-burn/torch", "burn/tch"]
+ndarray = ["diffusers-burn/ndarray", "burn/ndarray"]
+wgpu = ["diffusers-burn/wgpu", "burn/wgpu"]
+
+[dependencies]
+diffusers-burn = { path = "../..", features = ["std"], default-features = false }
+burn = { version = "0.20.1", default-features = false }
+clap = { version = "4", features = ["derive"] }
+image = "0.25"
+anyhow = "1.0"
+hf-hub = "0.4"
+ureq = "2"
+flate2 = "1"
+dirs = "6"

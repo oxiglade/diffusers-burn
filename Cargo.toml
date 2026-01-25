@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = ["burn/default", "std"]
-std = ["burn/std", "regex", "thiserror", "burn-import", "candle-core"]
+std = ["burn/std", "regex", "thiserror", "burn-store", "safetensors", "memmap2"]
 
 # Backend
 accelerate = ["burn/accelerate"]
@@ -17,16 +17,22 @@ wgpu = ["burn/wgpu"]
 
 [dependencies]
 burn = { version = "0.20.1", default-features = false }
-burn-import = { version = "0.20.1", optional = true }
+burn-store = { version = "0.20.1", optional = true, features = ["safetensors"] }
 num-traits = { version = "0.2.18", default-features = false }
 regex = { version = "1.10", optional = true }
+safetensors = { version = "0.4", optional = true }
+memmap2 = { version = "0.9", optional = true }
 serde = { version = "1.0.197", default-features = false, features = [
     "derive",
     "alloc",
 ] }
 thiserror = { version = "1.0", optional = true }
 
-# Pin candle-core to 0.9.1 via direct dependency to match burn-import 0.20.1
-[dependencies.candle-core]
-version = "=0.9.1"
-optional = true
+[dev-dependencies]
+anyhow = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+dirs = "5.0"
+flate2 = "1.0"
+hf-hub = "0.3"
+image = "0.25"
+ureq = "2.9"

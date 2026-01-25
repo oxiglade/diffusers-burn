@@ -1,7 +1,7 @@
 //! Weight Loading Utilities
 //!
 //! This module provides utilities for loading pre-trained weights from
-//! SafeTensors format into Burn models.
+//! SafeTensors format into Burn models using `burn-store`.
 //!
 //! # Overview
 //!
@@ -19,41 +19,27 @@
 //! # Example Usage
 //!
 //! ```ignore
-//! use diffusers_burn::pipelines::weights::load_safetensors;
+//! use diffusers_burn::pipelines::weights::{load_clip_safetensors, load_vae_safetensors, load_unet_safetensors};
 //! use diffusers_burn::pipelines::stable_diffusion::StableDiffusionConfig;
 //!
 //! let config = StableDiffusionConfig::v1_5(None, None, None);
 //! let device = Default::default();
 //!
 //! // Initialize models
-//! let mut pipeline = config.init::<MyBackend>(&device);
+//! let clip = config.build_clip_transformer::<Backend>(&device);
+//! let vae = config.build_vae::<Backend>(&device);
+//! let unet = config.build_unet::<Backend>(&device, 4);
 //!
 //! // Load weights
-//! pipeline.clip = load_safetensors(
-//!     pipeline.clip,
-//!     "path/to/text_encoder/model.safetensors",
-//!     &device,
-//! )?;
-//!
-//! pipeline.vae = load_safetensors(
-//!     pipeline.vae,
-//!     "path/to/vae/diffusion_pytorch_model.safetensors",
-//!     &device,
-//! )?;
-//!
-//! pipeline.unet = load_safetensors(
-//!     pipeline.unet,
-//!     "path/to/unet/diffusion_pytorch_model.safetensors",
-//!     &device,
-//! )?;
+//! let clip = load_clip_safetensors::<Backend, _, _>(clip, "path/to/model.safetensors", &device)?;
+//! let vae = load_vae_safetensors::<Backend, _, _>(vae, "path/to/vae.safetensors", &device)?;
+//! let unet = load_unet_safetensors::<Backend, _, _>(unet, "path/to/unet.safetensors", &device)?;
 //! ```
 
 use std::path::Path;
 
-use burn::module::Module;
-use burn::record::{FullPrecisionSettings, Recorder};
 use burn::tensor::backend::Backend;
-use burn_import::safetensors::{LoadArgs, SafetensorsFileRecorder};
+use burn_store::{KeyRemapper, ModuleSnapshot, PyTorchToBurnAdapter, SafetensorsStore};
 
 /// Errors that can occur during weight loading.
 #[derive(Debug, thiserror::Error)]
@@ -64,76 +50,296 @@ pub enum WeightLoadError {
     Io(#[from] std::io::Error),
 }
 
-/// Load weights from a SafeTensors file into a Burn module.
+/// Load CLIP text encoder weights from HuggingFace format.
 ///
-/// This function uses the PyTorch adapter by default, which handles:
-/// - Transposing linear layer weights (PyTorch uses [out, in], Burn uses [in, out])
+/// This handles the key remapping from HuggingFace's naming convention
+/// (e.g., `text_model.embeddings.token_embedding`) to Burn's convention
+/// (e.g., `embeddings.token_embedding`).
+///
+/// Uses `PyTorchToBurnAdapter` to automatically handle:
+/// - Transposing linear layer weights
 /// - Renaming normalization parameters (weight->gamma, bias->beta)
-///
-/// # Arguments
-/// * `module` - The Burn module to load weights into
-/// * `path` - Path to the SafeTensors file
-/// * `device` - Device to load the weights onto
-///
-/// # Returns
-/// The module with loaded weights, or an error if loading fails.
-///
-/// # Example
-/// ```ignore
-/// let clip = config.build_clip_transformer::<Backend>(&device);
-/// let clip = load_safetensors(clip, "model.safetensors", &device)?;
-/// ```
-pub fn load_safetensors<B, M, P>(
-    module: M,
+pub fn load_clip_safetensors<B, M, P>(
+    mut module: M,
     path: P,
-    device: &B::Device,
+    _device: &B::Device,
 ) -> Result<M, WeightLoadError>
 where
     B: Backend,
-    M: Module<B>,
+    M: ModuleSnapshot<B>,
     P: AsRef<Path>,
 {
-    let recorder = SafetensorsFileRecorder::<FullPrecisionSettings>::default();
-    let args = LoadArgs::new(path.as_ref().to_path_buf());
+    // Remap HuggingFace CLIP keys to our model structure
+    let key_mappings: Vec<(&str, &str)> = vec![
+        // Remove "text_model." prefix
+        ("^text_model\\.", ""),
+    ];
 
-    let record = recorder
-        .load(args, device)
+    let remapper = KeyRemapper::from_patterns(key_mappings)
         .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
 
-    Ok(module.load_record(record))
+    let checkpoint_path = path.as_ref().to_path_buf();
+    let mut store = SafetensorsStore::from_file(checkpoint_path)
+        .with_from_adapter(PyTorchToBurnAdapter)
+        .remap(remapper);
+
+    module
+        .load_from(&mut store)
+        .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
+
+    Ok(module)
 }
 
-/// Load weights with debug output to see key mappings.
+/// Load VAE weights from HuggingFace format.
 ///
-/// This is useful when debugging weight loading issues to see:
-/// - Original keys from the SafeTensors file
-/// - How keys are mapped to Burn's naming convention
+/// This handles the key remapping from HuggingFace's naming convention to Burn's.
+/// Main differences:
+/// - HF uses `mid_block.resnets.0/1` but Burn uses `mid_block.resnet` (first) and
+///   `mid_block.attn_resnets.0.resnet_block` (second)
+/// - HF uses `mid_block.attentions.0` but Burn uses `mid_block.attn_resnets.0.attention_block`
+/// - HF uses `downsamplers.0` but Burn uses `downsampler`
+/// - HF uses `upsamplers.0` but Burn uses `upsampler`
 ///
-/// # Arguments
-/// * `module` - The Burn module to load weights into
-/// * `path` - Path to the SafeTensors file
-/// * `device` - Device to load the weights onto
-///
-/// # Returns
-/// The module with loaded weights, or an error if loading fails.
-pub fn load_safetensors_debug<B, M, P>(
-    module: M,
+/// Uses `PyTorchToBurnAdapter` to automatically handle:
+/// - Transposing linear layer weights
+/// - Renaming normalization parameters (weight->gamma, bias->beta)
+pub fn load_vae_safetensors<B, M, P>(
+    mut module: M,
     path: P,
-    device: &B::Device,
+    _device: &B::Device,
 ) -> Result<M, WeightLoadError>
 where
     B: Backend,
-    M: Module<B>,
+    M: ModuleSnapshot<B>,
     P: AsRef<Path>,
 {
-    let recorder = SafetensorsFileRecorder::<FullPrecisionSettings>::default();
-    let args = LoadArgs::new(path.as_ref().to_path_buf()).with_debug_print();
+    // Remap HuggingFace VAE keys to our model structure
+    // Order matters: more specific patterns should come first
+    // Note: VAE has encoder/decoder prefixes, so patterns should not use ^ anchor
+    let key_mappings: Vec<(&str, &str)> = vec![
+        // Mid block: first resnet (index 0) maps to standalone resnet field
+        ("\\.mid_block\\.resnets\\.0\\.", ".mid_block.resnet."),
+        // Mid block: second resnet (index 1) maps to attn_resnets.0.resnet_block
+        (
+            "\\.mid_block\\.resnets\\.1\\.",
+            ".mid_block.attn_resnets.0.resnet_block.",
+        ),
+        // Mid block: attention maps to attn_resnets.X.attention_block
+        (
+            "\\.mid_block\\.attentions\\.(\\d+)\\.",
+            ".mid_block.attn_resnets.$1.attention_block.",
+        ),
+        // Downsamplers: downsamplers.0 -> downsampler
+        ("\\.downsamplers\\.0\\.", ".downsampler."),
+        // Upsamplers: upsamplers.0 -> upsampler
+        ("\\.upsamplers\\.0\\.", ".upsampler."),
+    ];
 
-    let record = recorder
-        .load(args, device)
+    let remapper = KeyRemapper::from_patterns(key_mappings)
         .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
 
-    Ok(module.load_record(record))
+    let checkpoint_path = path.as_ref().to_path_buf();
+    let mut store = SafetensorsStore::from_file(checkpoint_path)
+        .with_from_adapter(PyTorchToBurnAdapter)
+        .remap(remapper);
+
+    module
+        .load_from(&mut store)
+        .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
+
+    Ok(module)
+}
+
+/// Inspect a safetensors file to determine which down/up blocks have attention.
+///
+/// Returns two vectors of booleans indicating which blocks have attention:
+/// - First vector: down_blocks (true if block has attention)
+/// - Second vector: up_blocks (true if block has attention)
+fn inspect_unet_block_types<P: AsRef<Path>>(
+    path: P,
+) -> Result<(Vec<bool>, Vec<bool>), WeightLoadError> {
+    use std::collections::HashSet;
+
+    let file = std::fs::File::open(path.as_ref())
+        .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
+    let buffer = unsafe { memmap2::MmapOptions::new().map(&file) }
+        .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
+    let tensors = safetensors::SafeTensors::deserialize(&buffer)
+        .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
+
+    let keys: Vec<String> = tensors.names().into_iter().cloned().collect();
+
+    // Find max block indices
+    let mut max_down_block = 0usize;
+    let mut max_up_block = 0usize;
+    let mut down_blocks_with_attn = HashSet::new();
+    let mut up_blocks_with_attn = HashSet::new();
+
+    for key in keys.iter() {
+        // Check for down_blocks.X pattern
+        if let Some(rest) = key.strip_prefix("down_blocks.") {
+            if let Some(dot_pos) = rest.find('.') {
+                if let Ok(idx) = rest[..dot_pos].parse::<usize>() {
+                    max_down_block = max_down_block.max(idx);
+                    // Check if this block has attentions
+                    if rest[dot_pos..].starts_with(".attentions.") {
+                        down_blocks_with_attn.insert(idx);
+                    }
+                }
+            }
+        }
+        // Check for up_blocks.X pattern
+        if let Some(rest) = key.strip_prefix("up_blocks.") {
+            if let Some(dot_pos) = rest.find('.') {
+                if let Ok(idx) = rest[..dot_pos].parse::<usize>() {
+                    max_up_block = max_up_block.max(idx);
+                    // Check if this block has attentions
+                    if rest[dot_pos..].starts_with(".attentions.") {
+                        up_blocks_with_attn.insert(idx);
+                    }
+                }
+            }
+        }
+    }
+
+    // Build boolean vectors
+    let down_has_attn: Vec<bool> = (0..=max_down_block)
+        .map(|i| down_blocks_with_attn.contains(&i))
+        .collect();
+    let up_has_attn: Vec<bool> = (0..=max_up_block)
+        .map(|i| up_blocks_with_attn.contains(&i))
+        .collect();
+
+    Ok((down_has_attn, up_has_attn))
+}
+
+/// Load UNet weights from HuggingFace format with smart block detection.
+///
+/// This function uses burn-store with `skip_enum_variants` to handle the enum-based
+/// block types (UNetDownBlock, UNetUpBlock) without needing variant names in the
+/// weight file keys.
+///
+/// Main differences between HuggingFace and Burn naming:
+/// - Mid block resnets: `mid_block.resnets.0/1` → `mid_block.resnet` / `mid_block.attn_resnets.0.resnet_block`
+/// - Mid block attention: `mid_block.attentions.0` → `mid_block.attn_resnets.0.spatial_transformer`
+/// - Downsampler: `downsamplers.0` → `downsampler`
+/// - Upsampler: `upsamplers.0` → `upsampler`
+/// - Cross-attention keys: `to_k/to_q/to_v` → `key/query/value`
+/// - Cross-attention output: `to_out.0` → `output`
+/// - FeedForward: `ff.net.0.proj` → `ff.geglu.proj`, `ff.net.2` → `ff.linear_outer`
+///
+/// For blocks with cross-attention (CrossAttnDownBlock2D, CrossAttnUpBlock2D):
+/// - resnets/downsamplers/upsamplers are nested under `downblock`/`upblock`
+///
+/// For basic blocks (DownBlock2D, UpBlock2D):
+/// - resnets/downsamplers/upsamplers are at the top level
+///
+/// Uses `PyTorchToBurnAdapter` to automatically handle:
+/// - Transposing linear layer weights
+/// - Renaming normalization parameters (weight->gamma, bias->beta)
+pub fn load_unet_safetensors<B, M, P>(
+    mut module: M,
+    path: P,
+    _device: &B::Device,
+) -> Result<M, WeightLoadError>
+where
+    B: Backend,
+    M: ModuleSnapshot<B>,
+    P: AsRef<Path>,
+{
+    // Inspect the file to determine block types
+    let (down_has_attn, up_has_attn) = inspect_unet_block_types(path.as_ref())?;
+
+    // Build key mappings for HuggingFace -> Burn structure
+    // Order matters: more specific patterns should come first
+    let mut key_mappings: Vec<(&str, &str)> = vec![
+        // Mid block remappings
+        ("^mid_block\\.resnets\\.0\\.", "mid_block.resnet."),
+        (
+            "^mid_block\\.resnets\\.1\\.",
+            "mid_block.attn_resnets.0.resnet_block.",
+        ),
+        (
+            "^mid_block\\.attentions\\.([0-9]+)\\.",
+            "mid_block.attn_resnets.$1.spatial_transformer.",
+        ),
+        // Cross-attention key remapping
+        ("\\.to_k\\.", ".key."),
+        ("\\.to_q\\.", ".query."),
+        ("\\.to_v\\.", ".value."),
+        ("\\.to_out\\.0\\.", ".output."),
+        // FeedForward remapping
+        ("\\.ff\\.net\\.0\\.proj\\.", ".ff.geglu.proj."),
+        ("\\.ff\\.net\\.2\\.", ".ff.linear_outer."),
+    ];
+
+    // Down block remappings - depends on whether block has attention
+    // We need to use owned strings for dynamic patterns
+    let mut dynamic_mappings: Vec<(String, String)> = Vec::new();
+
+    for (i, has_attn) in down_has_attn.iter().enumerate() {
+        if *has_attn {
+            // CrossAttnDownBlock2D: resnets/downsamplers nested under downblock
+            dynamic_mappings.push((
+                format!("^down_blocks\\.{}\\.resnets\\.", i),
+                format!("down_blocks.{}.downblock.resnets.", i),
+            ));
+            dynamic_mappings.push((
+                format!("^down_blocks\\.{}\\.downsamplers\\.0\\.", i),
+                format!("down_blocks.{}.downblock.downsampler.", i),
+            ));
+            // attentions stay at block level
+        } else {
+            // DownBlock2D: flat structure, just remap downsamplers.0 -> downsampler
+            dynamic_mappings.push((
+                format!("^down_blocks\\.{}\\.downsamplers\\.0\\.", i),
+                format!("down_blocks.{}.downsampler.", i),
+            ));
+        }
+    }
+
+    for (i, has_attn) in up_has_attn.iter().enumerate() {
+        if *has_attn {
+            // CrossAttnUpBlock2D: resnets/upsamplers nested under upblock
+            dynamic_mappings.push((
+                format!("^up_blocks\\.{}\\.resnets\\.", i),
+                format!("up_blocks.{}.upblock.resnets.", i),
+            ));
+            dynamic_mappings.push((
+                format!("^up_blocks\\.{}\\.upsamplers\\.0\\.", i),
+                format!("up_blocks.{}.upblock.upsampler.", i),
+            ));
+            // attentions stay at block level
+        } else {
+            // UpBlock2D: flat structure, just remap upsamplers.0 -> upsampler
+            dynamic_mappings.push((
+                format!("^up_blocks\\.{}\\.upsamplers\\.0\\.", i),
+                format!("up_blocks.{}.upsampler.", i),
+            ));
+        }
+    }
+
+    // Combine static and dynamic mappings
+    let dynamic_refs: Vec<(&str, &str)> = dynamic_mappings
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    key_mappings.extend(dynamic_refs);
+
+    let remapper = KeyRemapper::from_patterns(key_mappings)
+        .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
+
+    let checkpoint_path = path.as_ref().to_path_buf();
+    let mut store = SafetensorsStore::from_file(checkpoint_path)
+        .with_from_adapter(PyTorchToBurnAdapter)
+        .remap(remapper)
+        .skip_enum_variants(true); // This is the key: skip enum variant names when matching paths
+
+    module
+        .load_from(&mut store)
+        .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
+
+    Ok(module)
 }
 
 /// Instructions for downloading Stable Diffusion weights.

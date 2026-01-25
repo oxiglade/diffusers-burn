@@ -261,7 +261,7 @@ impl<B: Backend> ClipAttention<B> {
             .reshape([bsz, self.num_attention_heads, seq_len, src_len])
             .add(causal_attention_mask);
         let attn_weights = attn_weights.reshape([bsz * self.num_attention_heads, seq_len, src_len]);
-        let attn_weights = softmax(attn_weights, 3);
+        let attn_weights = softmax(attn_weights, 2);
 
         let attn_output = attn_weights.matmul(value_states);
         let attn_output = attn_output

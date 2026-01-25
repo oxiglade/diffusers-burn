@@ -14,7 +14,7 @@ use burn::tensor::Tensor;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use super::embeddings::{TimestepEmbedding, TimestepEmbeddingConfig, Timesteps};
+use super::embeddings::{get_timestep_embedding, TimestepEmbedding, TimestepEmbeddingConfig};
 use super::unet_2d_blocks::{
     CrossAttnDownBlock2D, CrossAttnDownBlock2DConfig, CrossAttnUpBlock2D, CrossAttnUpBlock2DConfig,
     DownBlock2D, DownBlock2DConfig, UNetMidBlock2DCrossAttn, UNetMidBlock2DCrossAttnConfig,
@@ -147,13 +147,19 @@ pub enum UNetUpBlock<B: Backend> {
 #[derive(Module, Debug)]
 pub struct UNet2DConditionModel<B: Backend> {
     conv_in: Conv2d<B>,
-    time_proj: Timesteps<B>,
     time_embedding: TimestepEmbedding<B>,
     down_blocks: Vec<UNetDownBlock<B>>,
     mid_block: UNetMidBlock2DCrossAttn<B>,
     up_blocks: Vec<UNetUpBlock<B>>,
     conv_norm_out: GroupNorm<B>,
     conv_out: Conv2d<B>,
+    #[module(skip)]
+    time_proj_channels: usize,
+    #[module(skip)]
+    flip_sin_to_cos: bool,
+    #[module(skip)]
+    freq_shift: f64,
+    #[module(skip)]
     center_input_sample: bool,
 }
 
@@ -178,7 +184,6 @@ impl UNet2DConditionModelConfig {
             .init(device);
 
         // Time embeddings
-        let time_proj = Timesteps::new(b_channels, self.flip_sin_to_cos, self.freq_shift);
         let time_embedding = TimestepEmbeddingConfig::new(b_channels, time_embed_dim).init(device);
 
         // Down blocks
@@ -298,10 +303,12 @@ impl UNet2DConditionModelConfig {
 
         UNet2DConditionModel {
             conv_in,
-            time_proj,
             time_embedding,
             down_blocks,
             mid_block,
+            time_proj_channels: b_channels,
+            flip_sin_to_cos: self.flip_sin_to_cos,
+            freq_shift: self.freq_shift,
             up_blocks,
             conv_norm_out,
             conv_out,
@@ -352,7 +359,12 @@ impl<B: Backend> UNet2DConditionModel<B> {
 
         // 1. Time embedding
         let timesteps: Tensor<B, 1> = Tensor::full([bsize], timestep as f32, &device);
-        let emb = self.time_proj.forward(timesteps);
+        let emb = get_timestep_embedding(
+            timesteps,
+            self.time_proj_channels,
+            self.flip_sin_to_cos,
+            self.freq_shift,
+        );
         let emb = self.time_embedding.forward(emb);
 
         // 2. Pre-process
