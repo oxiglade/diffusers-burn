@@ -655,4 +655,32 @@ mod tests {
             Tolerance::rel_abs(1e-3, 1e-3),
         )
     }
+
+    /// Test GELU activation matches diffusers-rs (tch gelu("none"))
+    /// Reference values from diffusers-rs v0.3.1
+    #[test]
+    fn test_gelu_matches_diffusers_rs() {
+        let device = Default::default();
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(
+            TensorData::from([-2.0f32, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]),
+            &device,
+        );
+
+        let result = gelu(xs);
+
+        // Reference values from diffusers-rs: gelu("none")
+        // [-0.04550028, -0.15865526, -0.15426877, 0.0, 0.34573123, 0.8413447, 1.9544997]
+        result.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
+                -0.04550028,
+                -0.15865526,
+                -0.15426877,
+                0.0,
+                0.34573123,
+                0.8413447,
+                1.9544997,
+            ]),
+            Tolerance::rel_abs(1e-4, 1e-4),
+        );
+    }
 }
