@@ -8,8 +8,10 @@ use burn::tensor::{backend::Backend, Tensor};
 use core::f64::consts::FRAC_PI_2;
 
 pub mod ddim;
+pub mod euler_discrete;
 
 pub use ddim::{DDIMScheduler, DDIMSchedulerConfig};
+pub use euler_discrete::{EulerDiscreteScheduler, EulerDiscreteSchedulerConfig};
 
 /// This represents how beta ranges from its minimum value to the maximum
 /// during training.
