@@ -8,11 +8,13 @@ use burn::tensor::{backend::Backend, Tensor};
 use core::f64::consts::FRAC_PI_2;
 
 pub mod ddim;
+pub mod ddpm;
 pub mod dpmsolver_multistep;
 pub mod euler_ancestral_discrete;
 pub mod euler_discrete;
 
 pub use ddim::{DDIMScheduler, DDIMSchedulerConfig};
+pub use ddpm::{DDPMScheduler, DDPMSchedulerConfig, DDPMVarianceType};
 pub use dpmsolver_multistep::{
     DPMSolverAlgorithmType, DPMSolverMultistepScheduler, DPMSolverMultistepSchedulerConfig,
     DPMSolverType,
