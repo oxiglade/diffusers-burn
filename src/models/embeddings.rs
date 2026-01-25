@@ -35,7 +35,7 @@ impl TimestepEmbeddingConfig {
 }
 
 impl<B: Backend> TimestepEmbedding<B> {
-    fn forward(&self, xs: Tensor<B, 2>) -> Tensor<B, 2> {
+    pub fn forward(&self, xs: Tensor<B, 2>) -> Tensor<B, 2> {
         let xs = silu(self.linear_1.forward(xs));
         self.linear_2.forward(xs)
     }

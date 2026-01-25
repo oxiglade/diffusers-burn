@@ -477,15 +477,21 @@ pub struct DownBlock2DConfig {
 
 #[derive(Module, Debug)]
 pub struct DownBlock2D<B: Backend> {
-    resnets: Vec<ResnetBlock2D<B>>,
+    pub resnets: Vec<ResnetBlock2D<B>>,
     downsampler: Option<Downsample2D<B>>,
 }
 
 impl DownBlock2DConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> DownBlock2D<B> {
         let resnets = (0..self.n_layers)
-            .map(|_| {
-                ResnetBlock2DConfig::new(self.out_channels)
+            .map(|i| {
+                let in_channels = if i == 0 {
+                    self.in_channels
+                } else {
+                    self.out_channels
+                };
+                ResnetBlock2DConfig::new(in_channels)
+                    .with_out_channels(Some(self.out_channels))
                     .with_eps(self.resnet_eps)
                     .with_groups(self.resnet_groups)
                     .with_output_scale_factor(self.output_scale_factor)
@@ -636,7 +642,7 @@ pub struct UpBlock2DConfig {
 
 #[derive(Module, Debug)]
 pub struct UpBlock2D<B: Backend> {
-    resnets: Vec<ResnetBlock2D<B>>,
+    pub resnets: Vec<ResnetBlock2D<B>>,
     upsampler: Option<Upsample2D<B>>,
 }
 
