@@ -3,12 +3,41 @@
 //! This module provides the Stable Diffusion pipeline for text-to-image generation.
 //! The pipeline combines a CLIP text encoder, a VAE, a UNet, and a noise scheduler
 //! to generate images from text prompts.
+//!
+//! # Example (pseudocode)
+//!
+//! ```ignore
+//! // Create configuration
+//! let config = StableDiffusionConfig::v1_5(None, None, None);
+//!
+//! // Build pipeline components
+//! let pipeline = config.init::<MyBackend>(&device);
+//!
+//! // Build scheduler
+//! let scheduler = config.build_ddim_scheduler::<MyBackend>(30, &device);
+//!
+//! // Tokenize prompt (requires std feature)
+//! let tokenizer = SimpleTokenizer::new("bpe_simple_vocab_16e6.txt", SimpleTokenizerConfig::v1_5())?;
+//! let tokens = tokenizer.encode("a photo of a cat")?;
+//! let uncond_tokens = tokenizer.encode("")?;
+//!
+//! // Generate image
+//! let image = generate_image_ddim(
+//!     &pipeline,
+//!     &scheduler,
+//!     tokens,
+//!     uncond_tokens,
+//!     7.5,  // guidance_scale
+//!     42,   // seed
+//!     &device,
+//! );
+//! ```
 
 use alloc::vec;
 
 use burn::module::Module;
 use burn::tensor::backend::Backend;
-use burn::tensor::{Int, Tensor};
+use burn::tensor::{Distribution, Int, Tensor};
 
 use crate::models::unet_2d::{BlockConfig, UNet2DConditionModel, UNet2DConditionModelConfig};
 use crate::models::vae::{AutoEncoderKL, AutoEncoderKLConfig};
@@ -405,6 +434,306 @@ impl<B: Backend> StableDiffusion<B> {
         let uncond_embeddings = self.encode_text(uncond_tokens);
         Tensor::cat(vec![uncond_embeddings, text_embeddings], 0)
     }
+}
+
+/// Generate an image using the DDIM scheduler.
+///
+/// This function implements the full diffusion loop with classifier-free guidance.
+///
+/// # Arguments
+/// * `pipeline` - The Stable Diffusion pipeline with loaded models
+/// * `scheduler` - The DDIM scheduler configured with the number of steps
+/// * `prompt_tokens` - Tokenized prompt as a vector of token IDs
+/// * `uncond_tokens` - Tokenized empty/negative prompt as a vector of token IDs
+/// * `guidance_scale` - Classifier-free guidance scale (typically 7.5)
+/// * `seed` - Random seed for reproducibility
+/// * `device` - Device to run inference on
+///
+/// # Returns
+/// Generated image tensor [1, 3, height, width] with values in [0, 1]
+pub fn generate_image_ddim<B: Backend>(
+    pipeline: &StableDiffusion<B>,
+    scheduler: &DDIMScheduler,
+    prompt_tokens: &[usize],
+    uncond_tokens: &[usize],
+    guidance_scale: f64,
+    _seed: u64,
+    device: &B::Device,
+) -> Tensor<B, 4> {
+    // Convert tokens to tensors
+    let prompt_tokens: Vec<i64> = prompt_tokens.iter().map(|&x| x as i64).collect();
+    let uncond_tokens: Vec<i64> = uncond_tokens.iter().map(|&x| x as i64).collect();
+
+    let prompt_tensor: Tensor<B, 1, Int> = Tensor::from_ints(&prompt_tokens[..], device);
+    let prompt_tensor: Tensor<B, 2, Int> = prompt_tensor.unsqueeze_dim(0);
+    let uncond_tensor: Tensor<B, 1, Int> = Tensor::from_ints(&uncond_tokens[..], device);
+    let uncond_tensor: Tensor<B, 2, Int> = uncond_tensor.unsqueeze_dim(0);
+
+    // Get text embeddings with guidance
+    let text_embeddings = pipeline.encode_prompt_with_guidance(prompt_tensor, uncond_tensor);
+
+    // Initialize random latents
+    let latent_height = pipeline.height / 8;
+    let latent_width = pipeline.width / 8;
+    let mut latents: Tensor<B, 4> = Tensor::random(
+        [1, 4, latent_height, latent_width],
+        Distribution::Normal(0.0, 1.0),
+        device,
+    );
+
+    // Scale initial noise by scheduler's init_noise_sigma
+    latents = latents * scheduler.init_noise_sigma();
+
+    // Diffusion loop
+    for &timestep in scheduler.timesteps().iter() {
+        // Duplicate latents for classifier-free guidance (uncond + cond)
+        let latent_model_input = Tensor::cat(vec![latents.clone(), latents.clone()], 0);
+
+        // Scale model input
+        let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep);
+
+        // Predict noise
+        let noise_pred =
+            pipeline.predict_noise(latent_model_input, timestep as f64, text_embeddings.clone());
+
+        // Split predictions for guidance
+        let [noise_pred_uncond, noise_pred_text] = noise_pred.chunk(2, 0).try_into().unwrap();
+
+        // Apply classifier-free guidance
+        let noise_pred =
+            noise_pred_uncond.clone() + (noise_pred_text - noise_pred_uncond) * guidance_scale;
+
+        // Scheduler step
+        latents = scheduler.step(&noise_pred, timestep, &latents);
+    }
+
+    // Decode latents to image
+    pipeline.decode_latents(latents)
+}
+
+/// Generate an image using the Euler Discrete scheduler.
+///
+/// # Arguments
+/// * `pipeline` - The Stable Diffusion pipeline with loaded models
+/// * `scheduler` - The Euler Discrete scheduler configured with the number of steps
+/// * `prompt_tokens` - Tokenized prompt as a vector of token IDs
+/// * `uncond_tokens` - Tokenized empty/negative prompt as a vector of token IDs
+/// * `guidance_scale` - Classifier-free guidance scale (typically 7.5)
+/// * `seed` - Random seed for reproducibility
+/// * `device` - Device to run inference on
+///
+/// # Returns
+/// Generated image tensor [1, 3, height, width] with values in [0, 1]
+pub fn generate_image_euler<B: Backend>(
+    pipeline: &StableDiffusion<B>,
+    scheduler: &EulerDiscreteScheduler,
+    prompt_tokens: &[usize],
+    uncond_tokens: &[usize],
+    guidance_scale: f64,
+    _seed: u64,
+    device: &B::Device,
+) -> Tensor<B, 4> {
+    // Convert tokens to tensors
+    let prompt_tokens: Vec<i64> = prompt_tokens.iter().map(|&x| x as i64).collect();
+    let uncond_tokens: Vec<i64> = uncond_tokens.iter().map(|&x| x as i64).collect();
+
+    let prompt_tensor: Tensor<B, 1, Int> = Tensor::from_ints(&prompt_tokens[..], device);
+    let prompt_tensor: Tensor<B, 2, Int> = prompt_tensor.unsqueeze_dim(0);
+    let uncond_tensor: Tensor<B, 1, Int> = Tensor::from_ints(&uncond_tokens[..], device);
+    let uncond_tensor: Tensor<B, 2, Int> = uncond_tensor.unsqueeze_dim(0);
+
+    // Get text embeddings with guidance
+    let text_embeddings = pipeline.encode_prompt_with_guidance(prompt_tensor, uncond_tensor);
+
+    // Initialize random latents
+    let latent_height = pipeline.height / 8;
+    let latent_width = pipeline.width / 8;
+    let mut latents: Tensor<B, 4> = Tensor::random(
+        [1, 4, latent_height, latent_width],
+        Distribution::Normal(0.0, 1.0),
+        device,
+    );
+
+    // Scale initial noise by scheduler's init_noise_sigma
+    latents = latents * scheduler.init_noise_sigma();
+
+    // Diffusion loop
+    for (i, &timestep) in scheduler.timesteps().iter().enumerate() {
+        // Duplicate latents for classifier-free guidance (uncond + cond)
+        let latent_model_input = Tensor::cat(vec![latents.clone(), latents.clone()], 0);
+
+        // Scale model input
+        let latent_model_input = scheduler.scale_model_input(latent_model_input, i as f64);
+
+        // Predict noise
+        let noise_pred =
+            pipeline.predict_noise(latent_model_input, timestep as f64, text_embeddings.clone());
+
+        // Split predictions for guidance
+        let [noise_pred_uncond, noise_pred_text] = noise_pred.chunk(2, 0).try_into().unwrap();
+
+        // Apply classifier-free guidance
+        let noise_pred =
+            noise_pred_uncond.clone() + (noise_pred_text - noise_pred_uncond) * guidance_scale;
+
+        // Scheduler step
+        latents = scheduler.step(&noise_pred, i as f64, &latents);
+    }
+
+    // Decode latents to image
+    pipeline.decode_latents(latents)
+}
+
+/// Generate an image using the DPM-Solver++ Multistep scheduler.
+///
+/// # Arguments
+/// * `pipeline` - The Stable Diffusion pipeline with loaded models
+/// * `scheduler` - The DPM-Solver++ scheduler configured with the number of steps
+/// * `prompt_tokens` - Tokenized prompt as a vector of token IDs
+/// * `uncond_tokens` - Tokenized empty/negative prompt as a vector of token IDs
+/// * `guidance_scale` - Classifier-free guidance scale (typically 7.5)
+/// * `seed` - Random seed for reproducibility
+/// * `device` - Device to run inference on
+///
+/// # Returns
+/// Generated image tensor [1, 3, height, width] with values in [0, 1]
+pub fn generate_image_dpm<B: Backend>(
+    pipeline: &StableDiffusion<B>,
+    scheduler: &mut DPMSolverMultistepScheduler<B>,
+    prompt_tokens: &[usize],
+    uncond_tokens: &[usize],
+    guidance_scale: f64,
+    _seed: u64,
+    device: &B::Device,
+) -> Tensor<B, 4> {
+    // Convert tokens to tensors
+    let prompt_tokens: Vec<i64> = prompt_tokens.iter().map(|&x| x as i64).collect();
+    let uncond_tokens: Vec<i64> = uncond_tokens.iter().map(|&x| x as i64).collect();
+
+    let prompt_tensor: Tensor<B, 1, Int> = Tensor::from_ints(&prompt_tokens[..], device);
+    let prompt_tensor: Tensor<B, 2, Int> = prompt_tensor.unsqueeze_dim(0);
+    let uncond_tensor: Tensor<B, 1, Int> = Tensor::from_ints(&uncond_tokens[..], device);
+    let uncond_tensor: Tensor<B, 2, Int> = uncond_tensor.unsqueeze_dim(0);
+
+    // Get text embeddings with guidance
+    let text_embeddings = pipeline.encode_prompt_with_guidance(prompt_tensor, uncond_tensor);
+
+    // Initialize random latents
+    let latent_height = pipeline.height / 8;
+    let latent_width = pipeline.width / 8;
+    let mut latents: Tensor<B, 4> = Tensor::random(
+        [1, 4, latent_height, latent_width],
+        Distribution::Normal(0.0, 1.0),
+        device,
+    );
+
+    // Scale initial noise by scheduler's init_noise_sigma
+    latents = latents * scheduler.init_noise_sigma();
+
+    // Get timesteps (need to clone since we iterate while mutating scheduler)
+    let timesteps: alloc::vec::Vec<usize> = scheduler.timesteps().to_vec();
+
+    // Diffusion loop
+    for (i, &timestep) in timesteps.iter().enumerate() {
+        // Duplicate latents for classifier-free guidance (uncond + cond)
+        let latent_model_input = Tensor::cat(vec![latents.clone(), latents.clone()], 0);
+
+        // Scale model input
+        let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep);
+
+        // Predict noise
+        let noise_pred =
+            pipeline.predict_noise(latent_model_input, timestep as f64, text_embeddings.clone());
+
+        // Split predictions for guidance
+        let [noise_pred_uncond, noise_pred_text] = noise_pred.chunk(2, 0).try_into().unwrap();
+
+        // Apply classifier-free guidance
+        let noise_pred =
+            noise_pred_uncond.clone() + (noise_pred_text - noise_pred_uncond) * guidance_scale;
+
+        // Scheduler step
+        latents = scheduler.step(&noise_pred, i, &latents);
+    }
+
+    // Decode latents to image
+    pipeline.decode_latents(latents)
+}
+
+/// Generate an image using the PNDM scheduler.
+///
+/// # Arguments
+/// * `pipeline` - The Stable Diffusion pipeline with loaded models
+/// * `scheduler` - The PNDM scheduler configured with the number of steps
+/// * `prompt_tokens` - Tokenized prompt as a vector of token IDs
+/// * `uncond_tokens` - Tokenized empty/negative prompt as a vector of token IDs
+/// * `guidance_scale` - Classifier-free guidance scale (typically 7.5)
+/// * `seed` - Random seed for reproducibility
+/// * `device` - Device to run inference on
+///
+/// # Returns
+/// Generated image tensor [1, 3, height, width] with values in [0, 1]
+pub fn generate_image_pndm<B: Backend>(
+    pipeline: &StableDiffusion<B>,
+    scheduler: &mut PNDMScheduler<B>,
+    prompt_tokens: &[usize],
+    uncond_tokens: &[usize],
+    guidance_scale: f64,
+    _seed: u64,
+    device: &B::Device,
+) -> Tensor<B, 4> {
+    // Convert tokens to tensors
+    let prompt_tokens: Vec<i64> = prompt_tokens.iter().map(|&x| x as i64).collect();
+    let uncond_tokens: Vec<i64> = uncond_tokens.iter().map(|&x| x as i64).collect();
+
+    let prompt_tensor: Tensor<B, 1, Int> = Tensor::from_ints(&prompt_tokens[..], device);
+    let prompt_tensor: Tensor<B, 2, Int> = prompt_tensor.unsqueeze_dim(0);
+    let uncond_tensor: Tensor<B, 1, Int> = Tensor::from_ints(&uncond_tokens[..], device);
+    let uncond_tensor: Tensor<B, 2, Int> = uncond_tensor.unsqueeze_dim(0);
+
+    // Get text embeddings with guidance
+    let text_embeddings = pipeline.encode_prompt_with_guidance(prompt_tensor, uncond_tensor);
+
+    // Initialize random latents
+    let latent_height = pipeline.height / 8;
+    let latent_width = pipeline.width / 8;
+    let mut latents: Tensor<B, 4> = Tensor::random(
+        [1, 4, latent_height, latent_width],
+        Distribution::Normal(0.0, 1.0),
+        device,
+    );
+
+    // Scale initial noise by scheduler's init_noise_sigma
+    latents = latents * scheduler.init_noise_sigma();
+
+    // Get timesteps (need to clone since we iterate while mutating scheduler)
+    let timesteps: alloc::vec::Vec<usize> = scheduler.timesteps().to_vec();
+
+    // Diffusion loop
+    for &timestep in timesteps.iter() {
+        // Duplicate latents for classifier-free guidance (uncond + cond)
+        let latent_model_input = Tensor::cat(vec![latents.clone(), latents.clone()], 0);
+
+        // Scale model input
+        let latent_model_input = scheduler.scale_model_input(latent_model_input, timestep);
+
+        // Predict noise
+        let noise_pred =
+            pipeline.predict_noise(latent_model_input, timestep as f64, text_embeddings.clone());
+
+        // Split predictions for guidance
+        let [noise_pred_uncond, noise_pred_text] = noise_pred.chunk(2, 0).try_into().unwrap();
+
+        // Apply classifier-free guidance
+        let noise_pred =
+            noise_pred_uncond.clone() + (noise_pred_text - noise_pred_uncond) * guidance_scale;
+
+        // Scheduler step
+        latents = scheduler.step(&noise_pred, timestep, &latents);
+    }
+
+    // Decode latents to image
+    pipeline.decode_latents(latents)
 }
 
 #[cfg(test)]
