@@ -9,12 +9,16 @@ use core::f64::consts::FRAC_PI_2;
 
 pub mod ddim;
 pub mod dpmsolver_multistep;
+pub mod euler_ancestral_discrete;
 pub mod euler_discrete;
 
 pub use ddim::{DDIMScheduler, DDIMSchedulerConfig};
 pub use dpmsolver_multistep::{
     DPMSolverAlgorithmType, DPMSolverMultistepScheduler, DPMSolverMultistepSchedulerConfig,
     DPMSolverType,
+};
+pub use euler_ancestral_discrete::{
+    EulerAncestralDiscreteScheduler, EulerAncestralDiscreteSchedulerConfig,
 };
 pub use euler_discrete::{EulerDiscreteScheduler, EulerDiscreteSchedulerConfig};
 
