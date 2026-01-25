@@ -343,7 +343,14 @@ impl<B: Backend> ClipTextTransformer<B> {
         mask.triu(1).unsqueeze_dim(1)
     }
 
-    fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
+    /// Forward pass through the CLIP text transformer.
+    ///
+    /// # Arguments
+    /// * `xs` - Token IDs [batch_size, seq_len]
+    ///
+    /// # Returns
+    /// Text embeddings [batch_size, seq_len, embed_dim]
+    pub fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [bsz, seq_len] = xs.dims();
         let xs = self.embeddings.forward(xs);
         let causal_attention_mask =
