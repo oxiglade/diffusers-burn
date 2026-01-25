@@ -51,27 +51,27 @@ where
 mod tests {
     use super::*;
     use crate::TestBackend;
-    use burn::tensor::{Data, Shape};
+    use burn::tensor::{Shape, TensorData, Tolerance};
 
     #[test]
     fn test_pad_with_zeros() {
         let device = Default::default();
         let tensor: Tensor<TestBackend, 3> = Tensor::from_data(
-            Data::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]),
+            TensorData::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]),
             &device,
         );
 
         let padded = pad_with_zeros(tensor, 0, 1, 2);
 
         assert_eq!(padded.shape(), Shape::from([4, 2, 2]));
-        padded.to_data().assert_approx_eq(
-            &Data::from([
+        padded.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
                 [[0.0000, 0.0000], [0.0000, 0.0000]],
                 [[1.6585, 0.4320], [-0.8701, -0.4649]],
                 [[0.0000, 0.0000], [0.0000, 0.0000]],
                 [[0.0000, 0.0000], [0.0000, 0.0000]],
             ]),
-            3,
+            Tolerance::rel_abs(1e-3, 1e-3),
         )
     }
 }

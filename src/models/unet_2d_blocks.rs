@@ -25,7 +25,7 @@ use super::{
 use alloc::vec;
 use alloc::vec::Vec;
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 struct Downsample2DConfig {
     in_channels: usize,
     use_conv: bool,
@@ -71,13 +71,13 @@ impl<B: Backend> Downsample2D<B> {
 
     fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
         match &self.conv {
-            None => avg_pool2d(xs, [2, 2], [2, 2], [0, 0], true),
+            None => avg_pool2d(xs, [2, 2], [2, 2], [0, 0], true, false),
             Some(conv) => conv.forward(Self::pad_tensor(xs, self.padding)),
         }
     }
 }
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 struct Upsample2DConfig {
     in_channels: usize,
     out_channels: usize,
@@ -353,7 +353,7 @@ impl<B: Backend> UNetMidBlock2D<B> {
     }
 }
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct UNetMidBlock2DCrossAttnConfig {
     in_channels: usize,
     temb_channels: Option<usize>,
@@ -454,7 +454,7 @@ impl<B: Backend> UNetMidBlock2DCrossAttn<B> {
     }
 }
 
-#[derive(Config, Copy)]
+#[derive(Config, Debug, Copy)]
 pub struct DownBlock2DConfig {
     in_channels: usize,
     out_channels: usize,
@@ -537,7 +537,7 @@ impl<B: Backend> DownBlock2D<B> {
     }
 }
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct CrossAttnDownBlock2DConfig {
     in_channels: usize,
     out_channels: usize,
@@ -614,7 +614,7 @@ impl<B: Backend> CrossAttnDownBlock2D<B> {
     }
 }
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct UpBlock2DConfig {
     in_channels: usize,
     prev_output_channels: usize,
@@ -703,7 +703,7 @@ impl<B: Backend> UpBlock2D<B> {
     }
 }
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct CrossAttnUpBlock2DConfig {
     in_channels: usize,
     prev_output_channels: usize,
@@ -788,13 +788,13 @@ impl<B: Backend> CrossAttnUpBlock2D<B> {
 mod tests {
     use super::*;
     use crate::TestBackend;
-    use burn::tensor::{Data, Distribution, Shape};
+    use burn::tensor::{Distribution, Shape, TensorData, Tolerance};
 
     #[test]
     fn test_downsample_2d_no_conv() {
         let device = Default::default();
         let tensor: Tensor<TestBackend, 4> = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 [
                     [[0.0351, 0.4179], [0.0137, 0.6947]],
                     [[0.9526, 0.5386], [0.2856, 0.1839]],
@@ -814,12 +814,12 @@ mod tests {
         let downsample_2d = Downsample2DConfig::new(4, false, 4, 0).init(&device);
         let output = downsample_2d.forward(tensor);
 
-        output.into_data().assert_approx_eq(
-            &Data::from([
+        output.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
                 [[[0.2904]], [[0.4902]], [[0.4633]], [[0.3323]]],
                 [[[0.8031]], [[0.3632]], [[0.7049]], [[0.5074]]],
             ]),
-            3,
+            Tolerance::rel_abs(1e-3, 1e-3),
         );
     }
 
@@ -827,7 +827,7 @@ mod tests {
     fn test_pad_tensor_0() {
         let device = Default::default();
         let tensor: Tensor<TestBackend, 4> = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 [
                     [[0.8600, 0.9473], [0.2543, 0.6181]],
                     [[0.3889, 0.7722], [0.6736, 0.0454]],
@@ -846,8 +846,8 @@ mod tests {
 
         let output = Downsample2D::pad_tensor(tensor, 0);
 
-        output.into_data().assert_approx_eq(
-            &Data::from([
+        output.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
                 [
                     [
                         [0.8600, 0.9473, 0.0000],
@@ -893,15 +893,14 @@ mod tests {
                     ],
                 ],
             ]),
-            3,
+            Tolerance::rel_abs(1e-3, 1e-3),
         );
     }
 
     #[test]
     fn test_down_encoder_block2d() {
-        TestBackend::seed(0);
-
         let device = Default::default();
+        TestBackend::seed(&device, 0);
         let block = DownEncoderBlock2DConfig::new(32, 32).init::<TestBackend>(&device);
 
         let tensor: Tensor<TestBackend, 4> =
@@ -913,9 +912,8 @@ mod tests {
 
     #[test]
     fn test_up_decoder_block2d() {
-        TestBackend::seed(0);
-
         let device = Default::default();
+        TestBackend::seed(&device, 0);
         let block = UpDecoderBlock2DConfig::new(32, 32).init::<TestBackend>(&device);
 
         let tensor: Tensor<TestBackend, 4> =

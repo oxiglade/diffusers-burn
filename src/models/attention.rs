@@ -16,7 +16,7 @@ use burn::tensor::Tensor;
 #[allow(unused_imports)]
 use num_traits::Float;
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct GeGluConfig {
     /// The size of the input features.
     d_input: usize,
@@ -44,7 +44,7 @@ impl<B: Backend> GeGlu<B> {
     }
 }
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct FeedForwardConfig {
     /// The size of the input features.
     pub d_input: usize,
@@ -90,7 +90,7 @@ impl<B: Backend> FeedForward<B> {
     }
 }
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct CrossAttentionConfig {
     /// The number of channels in the query.
     d_query: usize,
@@ -232,7 +232,7 @@ impl<B: Backend> CrossAttention<B> {
     }
 }
 
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct BasicTransformerBlockConfig {
     d_model: usize,
     d_context: Option<usize>,
@@ -488,13 +488,13 @@ mod tests {
     use super::*;
     use crate::TestBackend;
     use burn::module::{Param, ParamId};
-    use burn::tensor::{Data, Shape};
+    use burn::tensor::{Shape, TensorData, Tolerance};
 
     #[test]
     fn test_geglu_tensor_shape_3() {
         let device = Default::default();
         let weight = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 [
                     0.1221, 2.0378, -0.1171, 1.3004, -0.9630, -0.3108, -1.3376, -1.0593,
                 ],
@@ -505,7 +505,7 @@ mod tests {
             &device,
         );
         let bias = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 0.2867778149426027,
                 0.6646517317105776,
                 0.023946332404821136,
@@ -526,7 +526,7 @@ mod tests {
         };
 
         let tensor: Tensor<TestBackend, 3> = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 [[1., 2.], [3., 4.], [5., 6.]],
                 [[7., 8.], [9., 10.], [11., 12.]],
             ]),
@@ -535,8 +535,8 @@ mod tests {
 
         let output = geglu.forward(tensor);
         assert_eq!(output.shape(), Shape::from([2, 3, 4]));
-        output.to_data().assert_approx_eq(
-            &Data::from([
+        output.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
                 [
                     [4.2632e0, -1.7927e-1, -2.3216e-1, -3.7916e-2],
                     [1.3460e1, -2.9266e-1, -2.1707e-4, -4.5595e-2],
@@ -548,7 +548,7 @@ mod tests {
                     [1.0119e2, -2.1943e-5, -0.0000e0, -0.0000e0],
                 ],
             ]),
-            2,
+            Tolerance::rel_abs(1e-2, 1e-2),
         );
     }
 
@@ -556,14 +556,14 @@ mod tests {
     fn test_geglu_tensor_shape_2() {
         let device = Default::default();
         let weight = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 [0.6054, 1.9322, 0.1445, 1.3004, -0.6853, -0.8947],
                 [-0.3678, 0.4081, -1.9001, -1.5843, -0.9399, 0.1018],
             ]),
             &device,
         );
         let bias = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 0.3237631905393836,
                 0.22052049807936902,
                 -0.3196353346822061,
@@ -582,17 +582,17 @@ mod tests {
         };
 
         let tensor: Tensor<TestBackend, 2> =
-            Tensor::from_data(Data::from([[1., 2.], [3., 4.], [5., 6.]]), &device);
+            Tensor::from_data(TensorData::from([[1., 2.], [3., 4.], [5., 6.]]), &device);
 
         let output = geglu.forward(tensor);
         assert_eq!(output.shape(), Shape::from([3, 3]));
-        output.to_data().assert_approx_eq(
-            &Data::from([
+        output.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
                 [-2.4192e-5, -3.3057e-2, 2.8535e-1],
                 [-0.0000e0, -2.0983e-7, 5.2465e-1],
                 [-0.0000e0, -0.0000e0, 1.2599e-2],
             ]),
-            1,
+            Tolerance::rel_abs(1e-1, 1e-1),
         );
     }
 
@@ -601,7 +601,7 @@ mod tests {
         let device = Default::default();
         // create tensor of size [2, 4, 2]
         let query: Tensor<TestBackend, 3> = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
                 [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
                 [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
@@ -610,7 +610,7 @@ mod tests {
             &device,
         );
         let key: Tensor<TestBackend, 3> = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
                 [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
                 [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
@@ -619,7 +619,7 @@ mod tests {
             &device,
         );
         let value: Tensor<TestBackend, 3> = Tensor::from_data(
-            Data::from([
+            TensorData::from([
                 [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
                 [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
                 [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
@@ -637,8 +637,8 @@ mod tests {
         let output = cross_attention.sliced_attention(query, key, value, 2);
 
         assert_eq!(output.shape(), Shape::from([2, 4, 4]));
-        output.into_data().assert_approx_eq(
-            &Data::from([
+        output.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
                 [
                     [5.9201, 6.9201, 14.9951, 15.9951],
                     [6.7557, 7.7557, 14.9986, 15.9986],
@@ -652,7 +652,7 @@ mod tests {
                     [23.0000, 24.0000, 31.0000, 32.0000],
                 ],
             ]),
-            3,
+            Tolerance::rel_abs(1e-3, 1e-3),
         )
     }
 }

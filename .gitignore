@@ -19,3 +19,6 @@ Cargo.lock
 # IDEs
 .idea
 .fleet
+
+# Others
+inspiration/

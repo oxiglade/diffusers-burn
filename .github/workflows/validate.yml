@@ -52,13 +52,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.backend }}-${{ hashFiles('**/Cargo.toml') }}
-      - name: (Linux) Install llvmpipe, lavapipe
-        if: runner.os == 'Linux'
+      - name: (Linux) Install Vulkan deps
+        if: runner.os == 'Linux' && matrix.backend == 'wgpu'
         run: |-
           sudo apt-get update -y -qq
-          sudo add-apt-repository ppa:kisak/kisak-mesa -y
-          sudo apt-get update
-          sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
+          sudo apt-get install -y libvulkan1 mesa-vulkan-drivers vulkan-tools libxcb-xfixes0-dev
       - name: (Windows) Install warp
         if: runner.os == 'Windows'
         shell: bash
@@ -88,9 +86,6 @@ jobs:
 
           echo "VK_DRIVER_FILES=$PWD/mesa/lvp_icd.x86_64.json" >> "$GITHUB_ENV"
           echo "GALLIUM_DRIVER=llvmpipe" >> "$GITHUB_ENV"
-      - name: (Windows) Install dxc
-        if: runner.os == 'Windows'
-        uses: napokue/setup-dxc@v1.1.0
       - name: Run tests
         shell: bash
         run: |-
