@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = ["burn/default", "std"]
-std = ["burn/std", "regex", "thiserror"]
+std = ["burn/std", "regex", "thiserror", "burn-import", "candle-core"]
 
 # Backend
 accelerate = ["burn/accelerate"]
@@ -17,6 +17,7 @@ wgpu = ["burn/wgpu"]
 
 [dependencies]
 burn = { version = "0.20.1", default-features = false }
+burn-import = { version = "0.20.1", optional = true }
 num-traits = { version = "0.2.18", default-features = false }
 regex = { version = "1.10", optional = true }
 serde = { version = "1.0.197", default-features = false, features = [
@@ -25,5 +26,7 @@ serde = { version = "1.0.197", default-features = false, features = [
 ] }
 thiserror = { version = "1.0", optional = true }
 
-[patch.crates-io]
-#burn = { git = "https://github.com/tracel-ai/burn" }
+# Pin candle-core to 0.9.1 via direct dependency to match burn-import 0.20.1
+[dependencies.candle-core]
+version = "=0.9.1"
+optional = true
