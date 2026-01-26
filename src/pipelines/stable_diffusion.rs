@@ -457,9 +457,12 @@ pub fn generate_image_ddim<B: Backend>(
     prompt_tokens: &[usize],
     uncond_tokens: &[usize],
     guidance_scale: f64,
-    _seed: u64,
+    seed: u64,
     device: &B::Device,
 ) -> Tensor<B, 4> {
+    // Seed the random number generator for reproducibility
+    B::seed(device, seed);
+
     // Convert tokens to tensors
     let prompt_tokens: Vec<i64> = prompt_tokens.iter().map(|&x| x as i64).collect();
     let uncond_tokens: Vec<i64> = uncond_tokens.iter().map(|&x| x as i64).collect();
@@ -530,9 +533,12 @@ pub fn generate_image_euler<B: Backend>(
     prompt_tokens: &[usize],
     uncond_tokens: &[usize],
     guidance_scale: f64,
-    _seed: u64,
+    seed: u64,
     device: &B::Device,
 ) -> Tensor<B, 4> {
+    // Seed the random number generator for reproducibility
+    B::seed(device, seed);
+
     // Convert tokens to tensors
     let prompt_tokens: Vec<i64> = prompt_tokens.iter().map(|&x| x as i64).collect();
     let uncond_tokens: Vec<i64> = uncond_tokens.iter().map(|&x| x as i64).collect();
@@ -603,9 +609,12 @@ pub fn generate_image_dpm<B: Backend>(
     prompt_tokens: &[usize],
     uncond_tokens: &[usize],
     guidance_scale: f64,
-    _seed: u64,
+    seed: u64,
     device: &B::Device,
 ) -> Tensor<B, 4> {
+    // Seed the random number generator for reproducibility
+    B::seed(device, seed);
+
     // Convert tokens to tensors
     let prompt_tokens: Vec<i64> = prompt_tokens.iter().map(|&x| x as i64).collect();
     let uncond_tokens: Vec<i64> = uncond_tokens.iter().map(|&x| x as i64).collect();
@@ -679,9 +688,12 @@ pub fn generate_image_pndm<B: Backend>(
     prompt_tokens: &[usize],
     uncond_tokens: &[usize],
     guidance_scale: f64,
-    _seed: u64,
+    seed: u64,
     device: &B::Device,
 ) -> Tensor<B, 4> {
+    // Seed the random number generator for reproducibility
+    B::seed(device, seed);
+
     // Convert tokens to tensors
     let prompt_tokens: Vec<i64> = prompt_tokens.iter().map(|&x| x as i64).collect();
     let uncond_tokens: Vec<i64> = uncond_tokens.iter().map(|&x| x as i64).collect();

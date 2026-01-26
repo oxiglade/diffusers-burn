@@ -124,7 +124,7 @@ struct Args {
     n_steps: usize,
 
     /// The random seed to be used for the generation.
-    #[arg(long, default_value_t = 42)]
+    #[arg(long, default_value_t = 32)]
     seed: u64,
 
     /// The name of the final image to generate.

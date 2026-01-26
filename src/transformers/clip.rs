@@ -145,15 +145,10 @@ impl ClipConfig {
 
         let embed_dim = self.embed_dim;
         let num_attention_heads = self.num_attention_heads;
-        let k_proj = nn::LinearConfig::new(embed_dim, embed_dim)
-            .with_bias(false)
-            .init(device);
-        let v_proj = nn::LinearConfig::new(embed_dim, embed_dim)
-            .with_bias(false)
-            .init(device);
-        let q_proj = nn::LinearConfig::new(embed_dim, embed_dim)
-            .with_bias(false)
-            .init(device);
+        // CLIP attention layers have bias (unlike UNet cross-attention which doesn't)
+        let k_proj = nn::LinearConfig::new(embed_dim, embed_dim).init(device);
+        let v_proj = nn::LinearConfig::new(embed_dim, embed_dim).init(device);
+        let q_proj = nn::LinearConfig::new(embed_dim, embed_dim).init(device);
         let out_proj = nn::LinearConfig::new(embed_dim, embed_dim).init(device);
         let head_dim = embed_dim / num_attention_heads;
         let scale = (head_dim as f64).powf(-0.5);
@@ -300,10 +295,10 @@ impl<B: Backend> ClipEncoderLayer<B> {
         let residual = xs;
         let xs = self.layer_norm1.forward(residual.clone());
         let xs = self.self_attn.forward(xs, causal_attention_mask);
-        let xs2 = xs.clone() + residual;
+        let xs = xs + residual;
 
-        let residual = xs2;
-        let xs = self.layer_norm2.forward(xs.clone());
+        let residual = xs.clone();
+        let xs = self.layer_norm2.forward(xs);
         let xs = self.mlp.forward(xs);
         xs + residual
     }
