@@ -8,6 +8,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 use burn::tensor::{backend::Backend, Distribution, Tensor};
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use num_traits::Float;
+
 use super::{BetaSchedule, PredictionType};
 
 /// Configuration for the Euler Discrete Scheduler.

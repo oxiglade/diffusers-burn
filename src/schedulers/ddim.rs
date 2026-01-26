@@ -11,11 +11,11 @@
 use alloc::vec::Vec;
 use burn::tensor::{backend::Backend, Tensor};
 
-use super::{betas_for_alpha_bar, BetaSchedule, PredictionType};
-
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use num_traits::Float;
+
+use super::{betas_for_alpha_bar, BetaSchedule, PredictionType};
 
 /// The configuration for the DDIM scheduler.
 #[derive(Debug, Clone, Copy)]

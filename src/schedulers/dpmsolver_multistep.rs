@@ -11,11 +11,11 @@ use alloc::vec;
 use alloc::vec::Vec;
 use burn::tensor::{backend::Backend, Tensor};
 
-use super::{betas_for_alpha_bar, BetaSchedule, PredictionType};
-
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use num_traits::Float;
+
+use super::{betas_for_alpha_bar, BetaSchedule, PredictionType};
 
 /// The algorithm type for the solver.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]

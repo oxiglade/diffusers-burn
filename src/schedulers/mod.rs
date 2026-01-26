@@ -7,6 +7,10 @@ use alloc::vec::Vec;
 use burn::tensor::{backend::Backend, Tensor};
 use core::f64::consts::FRAC_PI_2;
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use num_traits::Float;
+
 pub mod ddim;
 pub mod ddpm;
 pub mod dpmsolver_multistep;
