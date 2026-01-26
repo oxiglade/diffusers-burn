@@ -216,7 +216,7 @@ fn tensor_to_image(tensor: Tensor<Backend, 4>) -> image::RgbImage {
     // tensor shape: [1, 3, height, width], values in [0, 1]
     let [_, _, height, width] = tensor.dims();
 
-    // Convert to [0, 255] u8 values
+    // Convert to [0, 255] range
     let tensor = tensor * 255.0;
     let data: Vec<f32> = tensor.into_data().to_vec().unwrap();
 
@@ -225,9 +225,10 @@ fn tensor_to_image(tensor: Tensor<Backend, 4>) -> image::RgbImage {
 
     for y in 0..height {
         for x in 0..width {
-            let r = data[0 * height * width + y * width + x] as u8;
-            let g = data[1 * height * width + y * width + x] as u8;
-            let b = data[2 * height * width + y * width + x] as u8;
+            // Round and clamp to [0, 255] for proper u8 conversion (matches PyTorch's to_kind(Uint8))
+            let r = data[0 * height * width + y * width + x].round().clamp(0.0, 255.0) as u8;
+            let g = data[1 * height * width + y * width + x].round().clamp(0.0, 255.0) as u8;
+            let b = data[2 * height * width + y * width + x].round().clamp(0.0, 255.0) as u8;
             img.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
         }
     }
