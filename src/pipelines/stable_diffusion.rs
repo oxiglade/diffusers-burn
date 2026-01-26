@@ -93,8 +93,8 @@ impl StableDiffusionConfig {
     ) -> Self {
         let height = height.unwrap_or(512);
         let width = width.unwrap_or(512);
-        assert!(height % 8 == 0, "height must be divisible by 8");
-        assert!(width % 8 == 0, "width must be divisible by 8");
+        assert!(height.is_multiple_of(8), "height must be divisible by 8");
+        assert!(width.is_multiple_of(8), "width must be divisible by 8");
 
         // https://huggingface.co/runwayml/stable-diffusion-v1-5/blob/main/unet/config.json
         let unet = UNet2DConditionModelConfig {
@@ -156,8 +156,8 @@ impl StableDiffusionConfig {
     ) -> Self {
         let height = height.unwrap_or(768);
         let width = width.unwrap_or(768);
-        assert!(height % 8 == 0, "height must be divisible by 8");
-        assert!(width % 8 == 0, "width must be divisible by 8");
+        assert!(height.is_multiple_of(8), "height must be divisible by 8");
+        assert!(width.is_multiple_of(8), "width must be divisible by 8");
 
         // https://huggingface.co/stabilityai/stable-diffusion-2-1/blob/main/unet/config.json
         let unet = UNet2DConditionModelConfig {
@@ -287,7 +287,6 @@ impl StableDiffusionConfig {
             beta_schedule: self.beta_schedule,
             prediction_type: self.prediction_type,
             train_timesteps: self.train_timesteps,
-            ..EulerDiscreteSchedulerConfig::default()
         };
         EulerDiscreteScheduler::new(n_steps, config)
     }
@@ -573,7 +572,7 @@ pub fn generate_image_euler<B: Backend>(
 
         // Predict noise
         let noise_pred =
-            pipeline.predict_noise(latent_model_input, timestep as f64, text_embeddings.clone());
+            pipeline.predict_noise(latent_model_input, timestep, text_embeddings.clone());
 
         // Split predictions for guidance
         let [noise_pred_uncond, noise_pred_text] = noise_pred.chunk(2, 0).try_into().unwrap();

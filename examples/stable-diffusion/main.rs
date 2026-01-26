@@ -226,9 +226,15 @@ fn tensor_to_image(tensor: Tensor<Backend, 4>) -> image::RgbImage {
     for y in 0..height {
         for x in 0..width {
             // Round and clamp to [0, 255] for proper u8 conversion (matches PyTorch's to_kind(Uint8))
-            let r = data[0 * height * width + y * width + x].round().clamp(0.0, 255.0) as u8;
-            let g = data[1 * height * width + y * width + x].round().clamp(0.0, 255.0) as u8;
-            let b = data[2 * height * width + y * width + x].round().clamp(0.0, 255.0) as u8;
+            let r = data[0 * height * width + y * width + x]
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            let g = data[1 * height * width + y * width + x]
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            let b = data[2 * height * width + y * width + x]
+                .round()
+                .clamp(0.0, 255.0) as u8;
             img.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
         }
     }

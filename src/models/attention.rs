@@ -154,11 +154,9 @@ impl<B: Backend> CrossAttention<B> {
 
     fn reshape_batch_dim_to_heads(&self, xs: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch_size, seq_len, dim] = xs.dims();
-        let output = xs
-            .reshape([batch_size / self.n_heads, self.n_heads, seq_len, dim])
+        xs.reshape([batch_size / self.n_heads, self.n_heads, seq_len, dim])
             .swap_dims(1, 2)
-            .reshape([batch_size / self.n_heads, seq_len, dim * self.n_heads]);
-        output
+            .reshape([batch_size / self.n_heads, seq_len, dim * self.n_heads])
     }
 
     fn sliced_attention(

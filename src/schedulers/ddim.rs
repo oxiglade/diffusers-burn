@@ -146,11 +146,7 @@ impl DDIMScheduler {
         };
 
         // Calculate previous timestep
-        let prev_timestep = if timestep > self.step_ratio {
-            timestep - self.step_ratio
-        } else {
-            0
-        };
+        let prev_timestep = timestep.saturating_sub(self.step_ratio);
 
         let alpha_prod_t = self.alphas_cumprod[timestep];
         let alpha_prod_t_prev = self.alphas_cumprod[prev_timestep];

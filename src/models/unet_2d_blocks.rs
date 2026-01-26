@@ -66,7 +66,7 @@ impl<B: Backend> Downsample2D<B> {
             return pad_with_zeros(xs, 4 - 2, 0, 1);
         }
 
-        return xs;
+        xs
     }
 
     fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
