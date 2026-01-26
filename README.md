@@ -1,8 +1,8 @@
-# diffusers-burn: A diffusers API in Rust/Burn
+# diffusers-burn
 
-> **⚠️ This is still in development - contributors welcome!**
+Stable Diffusion in Rust using [Burn](https://github.com/burn-rs/burn). Supports SD 1.5 and 2.1.
 
-The `diffusers-burn` crate is a conversion of [diffusers-rs](https://github.com/LaurentMazare/diffusers-rs) using [burn](https://github.com/burn-rs/burn) rather than libtorch. This implementation supports Stable Diffusion v1.5, v2.1, as well as Stable Diffusion XL 1.0.
+Based on [diffusers-rs](https://github.com/LaurentMazare/diffusers-rs).
 
 <div align="left" valign="middle">
 <a href="https://runblaze.dev">
@@ -18,29 +18,39 @@ _[Blaze](https://runblaze.dev) supports this project by providing ultra-fast App
 
 </div>
 
-## Feature Flags
+## Quick Start
 
-This crate can be used without the standard library (`#![no_std]`) with `alloc` by disabling
-the default `std` feature.
+```bash
+# Using wgpu backend (default, works on most GPUs)
+cargo run --release --features wgpu --example stable-diffusion -- \
+  --prompt "A photo of a rusty robot on a beach"
 
-* `std` - enables the standard library. Enabled by default.
-* `wgpu` - uses ndarray as the backend. Enabled by default when none specified and `std`.
-* `ndarray` - uses ndarray as the backend.
-* `ndarray-no-std` - uses ndarray-no-std as the backend. Enabled by default when none and `#![no_std]`.
-* `ndarray-blas-accelerate` - uses ndarray with Accelerate framework (macOS only).
-* `torch` - uses torch as the backend.
+# Using torch backend
+cargo run --release --features torch --example stable-diffusion -- \
+  --prompt "A photo of a rusty robot on a beach"
+
+# SD 2.1 at 768x768
+cargo run --release --features torch --example stable-diffusion -- \
+  --sd-version v2-1 \
+  --prompt "A majestic lion on a cliff at sunset"
+```
+
+## Backends
+
+| Feature | Backend | Notes |
+|---------|---------|-------|
+| `wgpu` | WebGPU | Cross-platform GPU support |
+| `torch` | LibTorch | Requires libtorch |
+| `ndarray` | ndarray | CPU only, pure Rust |
+
+## no_std Support
+
+This crate supports `#![no_std]` with `alloc` by disabling the default `std` feature.
 
 ## Community
 
-If you are excited about the project or want to contribute, don't hesitate to join our [Discord](https://discord.gg/UHtSgF6j5J)!
-We try to be as welcoming as possible to everybody from any background. We're still building this out, but you can ask your questions there!
-
-## Status
-
-diffusers-burn is currently in active development, and is not yet complete.
+Join our [Discord](https://discord.gg/UHtSgF6j5J) if you want to contribute or have questions!
 
 ## License
 
-diffusers-burn is distributed under the terms of both the MIT license and the Apache License (Version 2.0).
-See [LICENSE-APACHE](./LICENSE-APACHE) and [LICENSE-MIT](./LICENSE-MIT) for details. Opening a pull
-request is assumed to signal agreement with these licensing terms.
+MIT or Apache-2.0, at your option.

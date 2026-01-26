@@ -145,15 +145,10 @@ impl ClipConfig {
 
         let embed_dim = self.embed_dim;
         let num_attention_heads = self.num_attention_heads;
-        let k_proj = nn::LinearConfig::new(embed_dim, embed_dim)
-            .with_bias(false)
-            .init(device);
-        let v_proj = nn::LinearConfig::new(embed_dim, embed_dim)
-            .with_bias(false)
-            .init(device);
-        let q_proj = nn::LinearConfig::new(embed_dim, embed_dim)
-            .with_bias(false)
-            .init(device);
+        // CLIP attention layers have bias (unlike UNet cross-attention which doesn't)
+        let k_proj = nn::LinearConfig::new(embed_dim, embed_dim).init(device);
+        let v_proj = nn::LinearConfig::new(embed_dim, embed_dim).init(device);
+        let q_proj = nn::LinearConfig::new(embed_dim, embed_dim).init(device);
         let out_proj = nn::LinearConfig::new(embed_dim, embed_dim).init(device);
         let head_dim = embed_dim / num_attention_heads;
         let scale = (head_dim as f64).powf(-0.5);
@@ -261,7 +256,7 @@ impl<B: Backend> ClipAttention<B> {
             .reshape([bsz, self.num_attention_heads, seq_len, src_len])
             .add(causal_attention_mask);
         let attn_weights = attn_weights.reshape([bsz * self.num_attention_heads, seq_len, src_len]);
-        let attn_weights = softmax(attn_weights, 3);
+        let attn_weights = softmax(attn_weights, 2);
 
         let attn_output = attn_weights.matmul(value_states);
         let attn_output = attn_output
@@ -300,10 +295,10 @@ impl<B: Backend> ClipEncoderLayer<B> {
         let residual = xs;
         let xs = self.layer_norm1.forward(residual.clone());
         let xs = self.self_attn.forward(xs, causal_attention_mask);
-        let xs2 = xs.clone() + residual;
+        let xs = xs + residual;
 
-        let residual = xs2;
-        let xs = self.layer_norm2.forward(xs.clone());
+        let residual = xs.clone();
+        let xs = self.layer_norm2.forward(xs);
         let xs = self.mlp.forward(xs);
         xs + residual
     }
@@ -343,7 +338,14 @@ impl<B: Backend> ClipTextTransformer<B> {
         mask.triu(1).unsqueeze_dim(1)
     }
 
-    fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
+    /// Forward pass through the CLIP text transformer.
+    ///
+    /// # Arguments
+    /// * `xs` - Token IDs [batch_size, seq_len]
+    ///
+    /// # Returns
+    /// Text embeddings [batch_size, seq_len, embed_dim]
+    pub fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [bsz, seq_len] = xs.dims();
         let xs = self.embeddings.forward(xs);
         let causal_attention_mask =
@@ -417,6 +419,90 @@ mod tests {
                 ]],
             ]),
             Tolerance::rel_abs(1e-3, 1e-3),
+        );
+    }
+
+    /// Test QuickGelu activation matches diffusers-rs
+    /// QuickGelu: x * sigmoid(1.702 * x)
+    /// Reference values from diffusers-rs v0.3.1
+    #[test]
+    fn test_quick_gelu_matches_diffusers_rs() {
+        let device = Default::default();
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(
+            TensorData::from([-2.0f32, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]),
+            &device,
+        );
+
+        let result = Activation::QuickGelu.forward(xs);
+
+        // Reference values from diffusers-rs: xs * (xs * 1.702).sigmoid()
+        result.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
+                -0.064341374f32,
+                -0.15420423,
+                -0.14961156,
+                0.0,
+                0.35038844,
+                0.84579575,
+                1.9356586,
+            ]),
+            Tolerance::rel_abs(1e-4, 1e-4),
+        );
+    }
+
+    /// Test GeluErf activation matches diffusers-rs
+    /// GeluErf: 0.5 * x * (1 + erf(x / sqrt(2)))
+    /// Reference values from diffusers-rs v0.3.1
+    #[test]
+    fn test_gelu_erf_matches_diffusers_rs() {
+        let device = Default::default();
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(
+            TensorData::from([-2.0f32, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]),
+            &device,
+        );
+
+        let result = Activation::GeluErf.forward(xs);
+
+        // Reference values from diffusers-rs: (xs * (xs / sqrt(2)).erf() + 1) / 2
+        result.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
+                -0.04550028f32,
+                -0.15865526,
+                -0.15426877,
+                0.0,
+                0.34573123,
+                0.8413447,
+                1.9544997,
+            ]),
+            Tolerance::rel_abs(1e-4, 1e-4),
+        );
+    }
+
+    /// Test Gelu activation matches diffusers-rs (gelu("none"))
+    /// Reference values from diffusers-rs v0.3.1
+    #[test]
+    fn test_gelu_matches_diffusers_rs() {
+        let device = Default::default();
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(
+            TensorData::from([-2.0f32, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]),
+            &device,
+        );
+
+        let result = Activation::Gelu.forward(xs);
+
+        // Reference values from diffusers-rs: gelu("none")
+        // Note: Burn's gelu() uses the same approximation as PyTorch's gelu("none")
+        result.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
+                -0.04550028f32,
+                -0.15865526,
+                -0.15426877,
+                0.0,
+                0.34573123,
+                0.8413447,
+                1.9544997,
+            ]),
+            Tolerance::rel_abs(1e-4, 1e-4),
         );
     }
 }

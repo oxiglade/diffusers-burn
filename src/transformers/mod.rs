@@ -6,3 +6,9 @@
 //! simple tokenization.
 
 pub mod clip;
+
+#[cfg(feature = "std")]
+pub mod clip_tokenizer;
+
+#[cfg(feature = "std")]
+pub use clip_tokenizer::{SimpleTokenizer, SimpleTokenizerConfig, TokenizerError};

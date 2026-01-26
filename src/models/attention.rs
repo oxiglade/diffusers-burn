@@ -154,11 +154,9 @@ impl<B: Backend> CrossAttention<B> {
 
     fn reshape_batch_dim_to_heads(&self, xs: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch_size, seq_len, dim] = xs.dims();
-        let output = xs
-            .reshape([batch_size / self.n_heads, self.n_heads, seq_len, dim])
+        xs.reshape([batch_size / self.n_heads, self.n_heads, seq_len, dim])
             .swap_dims(1, 2)
-            .reshape([batch_size / self.n_heads, seq_len, dim * self.n_heads]);
-        output
+            .reshape([batch_size / self.n_heads, seq_len, dim * self.n_heads])
     }
 
     fn sliced_attention(
@@ -314,7 +312,13 @@ impl<B: Backend> Proj<B> {
     fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
         match self {
             Proj::Conv2d(conv) => conv.forward(xs),
-            Proj::Linear(linear) => linear.forward(xs),
+            Proj::Linear(linear) => {
+                // For linear projection, we need to permute from [batch, channels, h, w]
+                // to [batch, h, w, channels], apply linear, then permute back
+                let xs = xs.swap_dims(1, 2).swap_dims(2, 3); // [batch, h, w, channels]
+                let xs = linear.forward(xs);
+                xs.swap_dims(2, 3).swap_dims(1, 2) // [batch, channels, h, w]
+            }
         }
     }
 }
@@ -325,7 +329,7 @@ pub struct SpatialTransformer<B: Backend> {
     norm: GroupNorm<B>,
     proj_in: Proj<B>,
     transformer_blocks: Vec<BasicTransformerBlock<B>>,
-    proj_out: nn::conv::Conv2d<B>,
+    proj_out: Proj<B>,
 }
 
 impl SpatialTransformerConfig {
@@ -352,8 +356,13 @@ impl SpatialTransformerConfig {
             transformer_blocks.push(tb)
         }
 
-        let proj_out =
-            nn::conv::Conv2dConfig::new([d_inner, self.in_channels], [1, 1]).init(device);
+        let proj_out = if self.use_linear_projection {
+            Proj::Linear(nn::LinearConfig::new(d_inner, self.in_channels).init(device))
+        } else {
+            Proj::Conv2d(
+                nn::conv::Conv2dConfig::new([d_inner, self.in_channels], [1, 1]).init(device),
+            )
+        };
 
         SpatialTransformer {
             norm,
@@ -654,5 +663,33 @@ mod tests {
             ]),
             Tolerance::rel_abs(1e-3, 1e-3),
         )
+    }
+
+    /// Test GELU activation matches diffusers-rs (tch gelu("none"))
+    /// Reference values from diffusers-rs v0.3.1
+    #[test]
+    fn test_gelu_matches_diffusers_rs() {
+        let device = Default::default();
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(
+            TensorData::from([-2.0f32, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]),
+            &device,
+        );
+
+        let result = gelu(xs);
+
+        // Reference values from diffusers-rs: gelu("none")
+        // [-0.04550028, -0.15865526, -0.15426877, 0.0, 0.34573123, 0.8413447, 1.9544997]
+        result.into_data().assert_approx_eq::<f32>(
+            &TensorData::from([
+                -0.04550028,
+                -0.15865526,
+                -0.15426877,
+                0.0,
+                0.34573123,
+                0.8413447,
+                1.9544997,
+            ]),
+            Tolerance::rel_abs(1e-4, 1e-4),
+        );
     }
 }
