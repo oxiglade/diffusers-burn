@@ -367,6 +367,7 @@ impl<B: Backend> ControlNet<B> {
 mod tests {
     use super::*;
     use crate::TestBackend;
+    use alloc::string::{String, ToString};
     use burn::module::{Module, ModuleMapper, Param};
     use burn::tensor::{Shape, TensorData};
 

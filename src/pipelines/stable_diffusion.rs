@@ -34,6 +34,7 @@
 //! ```
 
 use alloc::vec;
+use alloc::vec::Vec;
 
 use burn::module::Module;
 use burn::tensor::backend::Backend;

@@ -120,6 +120,7 @@ impl<B: Backend> ResnetBlock2D<B> {
 mod tests {
     use super::*;
     use crate::TestBackend;
+    use alloc::vec::Vec;
     use burn::tensor::{Distribution, Shape, TensorData, Tolerance};
 
     #[test]
