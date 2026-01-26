@@ -567,10 +567,6 @@ pub struct CrossAttnDownBlock2D<B: Backend> {
 
 impl CrossAttnDownBlock2DConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> CrossAttnDownBlock2D<B> {
-        let mut downblock = self.downblock;
-        downblock.in_channels = self.in_channels;
-        downblock.out_channels = self.out_channels;
-        downblock.temb_channels = self.temb_channels;
         let downblock = self.downblock.init(device);
 
         let attentions = (0..self.downblock.n_layers)
