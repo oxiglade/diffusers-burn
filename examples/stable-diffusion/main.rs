@@ -50,7 +50,8 @@ impl StableDiffusionVersion {
     fn repo_id(&self) -> &'static str {
         match self {
             StableDiffusionVersion::V1_5 => "runwayml/stable-diffusion-v1-5",
-            StableDiffusionVersion::V2_1 => "stabilityai/stable-diffusion-2-1",
+            // Use community repo (ungated) instead of stabilityai/stable-diffusion-2-1 (gated)
+            StableDiffusionVersion::V2_1 => "sd2-community/stable-diffusion-2-1",
         }
     }
 
@@ -58,8 +59,17 @@ impl StableDiffusionVersion {
         match self {
             // SD 1.5 uses OpenAI's CLIP
             StableDiffusionVersion::V1_5 => "openai/clip-vit-large-patch14",
-            // SD 2.1 has CLIP in the main repo
-            StableDiffusionVersion::V2_1 => "stabilityai/stable-diffusion-2-1",
+            // SD 2.1 community repo has CLIP in text_encoder subdirectory
+            StableDiffusionVersion::V2_1 => "sd2-community/stable-diffusion-2-1",
+        }
+    }
+
+    fn clip_weights_file(&self) -> &'static str {
+        match self {
+            // SD 1.5 uses standalone CLIP model
+            StableDiffusionVersion::V1_5 => "model.safetensors",
+            // SD 2.1 has CLIP in text_encoder subdirectory
+            StableDiffusionVersion::V2_1 => "text_encoder/model.safetensors",
         }
     }
 
@@ -124,16 +134,46 @@ struct Args {
     /// The Stable Diffusion version to use.
     #[arg(long, value_enum, default_value = "v1-5")]
     sd_version: StableDiffusionVersion,
+
+    /// Hugging Face API token for gated models (e.g., SD 2.1).
+    /// Can also be set via HF_TOKEN environment variable.
+    #[arg(long, env = "HF_TOKEN")]
+    hf_token: Option<String>,
 }
 
 /// Downloads a file from Hugging Face Hub if not already cached.
-fn download_hf_file(repo_id: &str, filename: &str) -> anyhow::Result<PathBuf> {
+fn download_hf_file(repo_id: &str, filename: &str, token: Option<&str>) -> anyhow::Result<PathBuf> {
     println!("  Downloading {} from {}...", filename, repo_id);
-    let api = Api::new()?;
+
+    let api = match token {
+        Some(t) => hf_hub::api::sync::ApiBuilder::new()
+            .with_token(Some(t.to_string()))
+            .build()?,
+        None => Api::new()?,
+    };
+
     let repo = api.model(repo_id.to_string());
-    let path = repo.get(filename)?;
-    println!("  Cached at: {}", path.display());
-    Ok(path)
+    match repo.get(filename) {
+        Ok(path) => {
+            println!("  Cached at: {}", path.display());
+            Ok(path)
+        }
+        Err(e) => {
+            // Provide helpful error message for 401 errors
+            let err_str = e.to_string();
+            if err_str.contains("401") {
+                anyhow::bail!(
+                    "Authentication required for {}.\n\
+                     This model requires accepting the license at https://huggingface.co/{}\n\
+                     Then provide your HF token via --hf-token or HF_TOKEN environment variable.\n\
+                     Get your token at: https://huggingface.co/settings/tokens",
+                    repo_id,
+                    repo_id
+                );
+            }
+            Err(e.into())
+        }
+    }
 }
 
 /// Downloads the BPE vocabulary file from OpenAI's GitHub.
@@ -226,10 +266,15 @@ fn run(args: Args) -> anyhow::Result<()> {
 
     // Download weights
     println!("\nPreparing model weights...");
+    let hf_token = args.hf_token.as_deref();
 
     let clip_weights = match &args.clip_weights {
         Some(path) => PathBuf::from(path),
-        None => download_hf_file(args.sd_version.clip_repo_id(), "model.safetensors")?,
+        None => download_hf_file(
+            args.sd_version.clip_repo_id(),
+            args.sd_version.clip_weights_file(),
+            hf_token,
+        )?,
     };
 
     let vae_weights = match &args.vae_weights {
@@ -237,6 +282,7 @@ fn run(args: Args) -> anyhow::Result<()> {
         None => download_hf_file(
             args.sd_version.repo_id(),
             "vae/diffusion_pytorch_model.safetensors",
+            hf_token,
         )?,
     };
 
@@ -245,6 +291,7 @@ fn run(args: Args) -> anyhow::Result<()> {
         None => download_hf_file(
             args.sd_version.repo_id(),
             "unet/diffusion_pytorch_model.safetensors",
+            hf_token,
         )?,
     };
 

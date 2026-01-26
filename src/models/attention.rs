@@ -314,7 +314,13 @@ impl<B: Backend> Proj<B> {
     fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
         match self {
             Proj::Conv2d(conv) => conv.forward(xs),
-            Proj::Linear(linear) => linear.forward(xs),
+            Proj::Linear(linear) => {
+                // For linear projection, we need to permute from [batch, channels, h, w]
+                // to [batch, h, w, channels], apply linear, then permute back
+                let xs = xs.swap_dims(1, 2).swap_dims(2, 3); // [batch, h, w, channels]
+                let xs = linear.forward(xs);
+                xs.swap_dims(2, 3).swap_dims(1, 2) // [batch, channels, h, w]
+            }
         }
     }
 }
@@ -325,7 +331,7 @@ pub struct SpatialTransformer<B: Backend> {
     norm: GroupNorm<B>,
     proj_in: Proj<B>,
     transformer_blocks: Vec<BasicTransformerBlock<B>>,
-    proj_out: nn::conv::Conv2d<B>,
+    proj_out: Proj<B>,
 }
 
 impl SpatialTransformerConfig {
@@ -352,8 +358,13 @@ impl SpatialTransformerConfig {
             transformer_blocks.push(tb)
         }
 
-        let proj_out =
-            nn::conv::Conv2dConfig::new([d_inner, self.in_channels], [1, 1]).init(device);
+        let proj_out = if self.use_linear_projection {
+            Proj::Linear(nn::LinearConfig::new(d_inner, self.in_channels).init(device))
+        } else {
+            Proj::Conv2d(
+                nn::conv::Conv2dConfig::new([d_inner, self.in_channels], [1, 1]).init(device),
+            )
+        };
 
         SpatialTransformer {
             norm,
