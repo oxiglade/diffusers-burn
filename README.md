@@ -37,11 +37,11 @@ cargo run --release --features torch --example stable-diffusion -- \
 
 ## Backends
 
-| Feature | Backend | Notes |
-|---------|---------|-------|
-| `wgpu` | WebGPU | Cross-platform GPU support |
-| `torch` | LibTorch | Requires libtorch |
-| `ndarray` | ndarray | CPU only, pure Rust |
+| Feature | Backend |
+|---------|---------|
+| `wgpu` | WebGPU |
+| `torch` | LibTorch |
+| `ndarray` | ndarray |
 
 ## no_std Support
 
