@@ -383,13 +383,18 @@ mod tests {
     }
 
     /// Test Heun Discrete scheduler values match diffusers-rs reference values
+    /// Note: Using ScaledLinear beta schedule to match the reference values from Euler Discrete
     #[test]
     fn test_heun_discrete_matches_diffusers_rs() {
         let device = Default::default();
-        let config = HeunDiscreteSchedulerConfig::default();
+        // Use ScaledLinear to match reference values (same as EulerDiscrete)
+        let config = HeunDiscreteSchedulerConfig {
+            beta_schedule: super::super::BetaSchedule::ScaledLinear,
+            ..Default::default()
+        };
         let scheduler = HeunDiscreteScheduler::<TestBackend>::new(20, config);
 
-        // Reference init_noise_sigma from diffusers-rs: 14.614646291831562
+        // Reference init_noise_sigma from diffusers-rs with ScaledLinear: 14.614646291831562
         let init_sigma = scheduler.init_noise_sigma();
         assert!(
             (init_sigma - 14.614646291831562).abs() < 1e-4,
@@ -410,7 +415,7 @@ mod tests {
         let scaled = scheduler.scale_model_input(sample, timestep);
         let scaled_mean: f32 = scaled.mean().into_scalar();
 
-        // Reference from diffusers-rs: 0.06826489418745041
+        // Reference from diffusers-rs with ScaledLinear: 0.06826489418745041
         assert!(
             (scaled_mean as f64 - 0.06826489418745041).abs() < 1e-4,
             "scale_model_input mean mismatch: actual={}, expected=0.06826489418745041",

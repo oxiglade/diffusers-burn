@@ -16,6 +16,11 @@ pub mod ddpm;
 pub mod dpmsolver_multistep;
 pub mod euler_ancestral_discrete;
 pub mod euler_discrete;
+pub mod heun_discrete;
+pub mod integrate;
+pub mod k_dpm_2_ancestral_discrete;
+pub mod k_dpm_2_discrete;
+pub mod lms_discrete;
 pub mod pndm;
 
 pub use ddim::{DDIMScheduler, DDIMSchedulerConfig};
@@ -28,6 +33,12 @@ pub use euler_ancestral_discrete::{
     EulerAncestralDiscreteScheduler, EulerAncestralDiscreteSchedulerConfig,
 };
 pub use euler_discrete::{EulerDiscreteScheduler, EulerDiscreteSchedulerConfig};
+pub use heun_discrete::{HeunDiscreteScheduler, HeunDiscreteSchedulerConfig};
+pub use k_dpm_2_ancestral_discrete::{
+    KDPM2AncestralDiscreteScheduler, KDPM2AncestralDiscreteSchedulerConfig,
+};
+pub use k_dpm_2_discrete::{KDPM2DiscreteScheduler, KDPM2DiscreteSchedulerConfig};
+pub use lms_discrete::{LMSDiscreteScheduler, LMSDiscreteSchedulerConfig};
 pub use pndm::{PNDMScheduler, PNDMSchedulerConfig};
 
 /// This represents how beta ranges from its minimum value to the maximum
