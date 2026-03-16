@@ -127,6 +127,8 @@ impl StableDiffusionConfig {
             norm_num_groups: 32,
             sliced_attention_size,
             use_linear_projection: false,
+            addition_time_embed_dim: None,
+            projection_class_embeddings_input_dim: None,
         };
 
         // https://huggingface.co/runwayml/stable-diffusion-v1-5/blob/main/vae/config.json
@@ -190,6 +192,8 @@ impl StableDiffusionConfig {
             norm_num_groups: 32,
             sliced_attention_size,
             use_linear_projection: true,
+            addition_time_embed_dim: None,
+            projection_class_embeddings_input_dim: None,
         };
 
         // https://huggingface.co/stabilityai/stable-diffusion-2-1/blob/main/vae/config.json

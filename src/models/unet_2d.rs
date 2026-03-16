@@ -21,6 +21,12 @@ use super::unet_2d_blocks::{
     UpBlock2D, UpBlock2DConfig,
 };
 
+/// Additional conditioning for SDXL (text_embeds + time_ids).
+pub struct AddedCondKwargs<B: Backend> {
+    pub text_embeds: Tensor<B, 2>, // [batch, 1280]
+    pub time_ids: Tensor<B, 2>,    // [batch, 6]
+}
+
 /// Configuration for a single UNet block.
 #[derive(Debug, Clone, burn::serde::Serialize, burn::serde::Deserialize)]
 pub struct BlockConfig {
@@ -101,6 +107,10 @@ pub struct UNet2DConditionModelConfig {
     /// Whether to use linear projection in attention.
     #[config(default = false)]
     pub use_linear_projection: bool,
+    /// Dimension of the additional time embedding projection (None for SD 1.5/2.1, 256 for SDXL).
+    pub addition_time_embed_dim: Option<usize>,
+    /// Input dimension for the addition embedding projection (None for SD 1.5/2.1, 2816 for SDXL).
+    pub projection_class_embeddings_input_dim: Option<usize>,
 }
 
 impl Default for UNet2DConditionModelConfig {
@@ -131,6 +141,8 @@ impl Default for UNet2DConditionModelConfig {
             cross_attention_dim: 1280,
             sliced_attention_size: None,
             use_linear_projection: false,
+            addition_time_embed_dim: None,
+            projection_class_embeddings_input_dim: None,
         }
     }
 }
@@ -157,6 +169,7 @@ pub enum UNetUpBlock<B: Backend> {
 pub struct UNet2DConditionModel<B: Backend> {
     pub conv_in: Conv2d<B>,
     pub time_embedding: TimestepEmbedding<B>,
+    pub add_embedding: Option<TimestepEmbedding<B>>,
     pub down_blocks: Vec<UNetDownBlock<B>>,
     pub mid_block: UNetMidBlock2DCrossAttn<B>,
     pub up_blocks: Vec<UNetUpBlock<B>>,
@@ -170,6 +183,8 @@ pub struct UNet2DConditionModel<B: Backend> {
     pub freq_shift: f64,
     #[module(skip)]
     pub center_input_sample: bool,
+    #[module(skip)]
+    pub addition_time_embed_dim: Option<usize>,
 }
 
 impl UNet2DConditionModelConfig {
@@ -194,6 +209,14 @@ impl UNet2DConditionModelConfig {
 
         // Time embeddings
         let time_embedding = TimestepEmbeddingConfig::new(b_channels, time_embed_dim).init(device);
+
+        // Addition embedding for SDXL
+        let add_embedding = match (self.addition_time_embed_dim, self.projection_class_embeddings_input_dim) {
+            (Some(_), Some(input_dim)) => {
+                Some(TimestepEmbeddingConfig::new(input_dim, time_embed_dim).init(device))
+            }
+            _ => None,
+        };
 
         // Down blocks
         let down_blocks = (0..n_blocks)
@@ -321,6 +344,7 @@ impl UNet2DConditionModelConfig {
         UNet2DConditionModel {
             conv_in,
             time_embedding,
+            add_embedding,
             down_blocks,
             mid_block,
             time_proj_channels: b_channels,
@@ -330,6 +354,7 @@ impl UNet2DConditionModelConfig {
             conv_norm_out,
             conv_out,
             center_input_sample: self.center_input_sample,
+            addition_time_embed_dim: self.addition_time_embed_dim,
         }
     }
 }
@@ -347,7 +372,7 @@ impl<B: Backend> UNet2DConditionModel<B> {
         timestep: f64,
         encoder_hidden_states: Tensor<B, 3>,
     ) -> Tensor<B, 4> {
-        self.forward_with_additional_residuals(xs, timestep, encoder_hidden_states, None, None)
+        self.forward_with_additional_residuals(xs, timestep, encoder_hidden_states, None, None, None)
     }
 
     /// Forward pass with additional residuals (for ControlNet support).
@@ -358,6 +383,7 @@ impl<B: Backend> UNet2DConditionModel<B> {
         encoder_hidden_states: Tensor<B, 3>,
         down_block_additional_residuals: Option<&[Tensor<B, 4>]>,
         mid_block_additional_residual: Option<&Tensor<B, 4>>,
+        added_cond_kwargs: Option<&AddedCondKwargs<B>>,
     ) -> Tensor<B, 4> {
         let [bsize, _channels, height, width] = xs.dims();
         let device = xs.device();
@@ -382,7 +408,24 @@ impl<B: Backend> UNet2DConditionModel<B> {
             self.flip_sin_to_cos,
             self.freq_shift,
         );
-        let emb = self.time_embedding.forward(emb);
+        let mut emb = self.time_embedding.forward(emb);
+
+        // Augmented embedding for SDXL
+        if let (Some(ref add_emb), Some(added_cond), Some(atd)) =
+            (&self.add_embedding, added_cond_kwargs, self.addition_time_embed_dim)
+        {
+            let [bsize_cond, _] = added_cond.text_embeds.dims();
+            let time_embeds = get_timestep_embedding(
+                added_cond.time_ids.clone().flatten::<1>(0, 1),
+                atd,
+                self.flip_sin_to_cos,
+                self.freq_shift,
+            );
+            let time_embeds = time_embeds.reshape([bsize_cond, atd * 6]);
+            let add_embeds = Tensor::cat(vec![added_cond.text_embeds.clone(), time_embeds], 1);
+            let aug_emb = add_emb.forward(add_embeds);
+            emb = emb + aug_emb;
+        }
 
         // 2. Pre-process
         let xs = self.conv_in.forward(xs);
@@ -647,5 +690,49 @@ mod tests {
             mean,
             expected_mean
         );
+    }
+
+    #[test]
+    fn test_unet2d_sdxl_addition_embedding() {
+        let device = Default::default();
+
+        let config = UNet2DConditionModelConfig {
+            blocks: vec![
+                BlockConfig::new(32)
+                    .with_use_cross_attn(false)
+                    .with_attention_head_dim(8),
+                BlockConfig::new(64)
+                    .with_use_cross_attn(true)
+                    .with_attention_head_dim(8),
+            ],
+            layers_per_block: 1,
+            norm_num_groups: 32,
+            cross_attention_dim: 64,
+            addition_time_embed_dim: Some(16),
+            projection_class_embeddings_input_dim: Some(128),
+            ..Default::default()
+        };
+
+        let unet = config.init::<TestBackend>(4, 4, &device);
+        assert!(unet.add_embedding.is_some());
+
+        let xs: Tensor<TestBackend, 4> = Tensor::zeros([1, 4, 32, 32], &device);
+        let enc: Tensor<TestBackend, 3> = Tensor::zeros([1, 8, 64], &device);
+        let added_cond = AddedCondKwargs {
+            text_embeds: Tensor::zeros([1, 32], &device),
+            time_ids: Tensor::zeros([1, 6], &device),
+        };
+
+        let output =
+            unet.forward_with_additional_residuals(xs, 1.0, enc, None, None, Some(&added_cond));
+        assert_eq!(output.shape(), Shape::from([1, 4, 32, 32]));
+    }
+
+    #[test]
+    fn test_unet2d_no_addition_embedding_backward_compat() {
+        let device = Default::default();
+        let config = UNet2DConditionModelConfig::default();
+        let unet = config.init::<TestBackend>(4, 4, &device);
+        assert!(unet.add_embedding.is_none());
     }
 }
