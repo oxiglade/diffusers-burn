@@ -30,6 +30,8 @@ pub struct BlockConfig {
     pub use_cross_attn: bool,
     /// Number of attention heads.
     pub attention_head_dim: usize,
+    /// Number of transformer layers per block (1 for SD 1.5/2.1, variable for SDXL).
+    pub transformer_layers_per_block: usize,
 }
 
 impl BlockConfig {
@@ -39,6 +41,7 @@ impl BlockConfig {
             out_channels,
             use_cross_attn: true,
             attention_head_dim: 8,
+            transformer_layers_per_block: 1,
         }
     }
 
@@ -51,6 +54,12 @@ impl BlockConfig {
     /// Set the attention head dimension.
     pub fn with_attention_head_dim(mut self, attention_head_dim: usize) -> Self {
         self.attention_head_dim = attention_head_dim;
+        self
+    }
+
+    /// Set the number of transformer layers per block.
+    pub fn with_transformer_layers_per_block(mut self, transformer_layers_per_block: usize) -> Self {
+        self.transformer_layers_per_block = transformer_layers_per_block;
         self
     }
 }
@@ -146,21 +155,21 @@ pub enum UNetUpBlock<B: Backend> {
 /// (from text conditioning) and predicts the noise to be removed.
 #[derive(Module, Debug)]
 pub struct UNet2DConditionModel<B: Backend> {
-    conv_in: Conv2d<B>,
-    time_embedding: TimestepEmbedding<B>,
-    down_blocks: Vec<UNetDownBlock<B>>,
-    mid_block: UNetMidBlock2DCrossAttn<B>,
-    up_blocks: Vec<UNetUpBlock<B>>,
-    conv_norm_out: GroupNorm<B>,
-    conv_out: Conv2d<B>,
+    pub conv_in: Conv2d<B>,
+    pub time_embedding: TimestepEmbedding<B>,
+    pub down_blocks: Vec<UNetDownBlock<B>>,
+    pub mid_block: UNetMidBlock2DCrossAttn<B>,
+    pub up_blocks: Vec<UNetUpBlock<B>>,
+    pub conv_norm_out: GroupNorm<B>,
+    pub conv_out: Conv2d<B>,
     #[module(skip)]
-    time_proj_channels: usize,
+    pub time_proj_channels: usize,
     #[module(skip)]
-    flip_sin_to_cos: bool,
+    pub flip_sin_to_cos: bool,
     #[module(skip)]
-    freq_shift: f64,
+    pub freq_shift: f64,
     #[module(skip)]
-    center_input_sample: bool,
+    pub center_input_sample: bool,
 }
 
 impl UNet2DConditionModelConfig {
@@ -219,7 +228,8 @@ impl UNet2DConditionModelConfig {
                         .with_attn_num_head_channels(attention_head_dim)
                         .with_cross_attention_dim(self.cross_attention_dim)
                         .with_sliced_attention_size(sliced_attention_size)
-                        .with_use_linear_projection(self.use_linear_projection);
+                        .with_use_linear_projection(self.use_linear_projection)
+                        .with_transformer_layers_per_block(block_config.transformer_layers_per_block);
                     UNetDownBlock::CrossAttn(config.init(device))
                 } else {
                     UNetDownBlock::Basic(db_config.init(device))
@@ -228,6 +238,11 @@ impl UNet2DConditionModelConfig {
             .collect();
 
         // Mid block
+        let bl_transformer_layers_per_block = self.blocks.iter()
+            .rev()
+            .find(|b| b.use_cross_attn)
+            .map(|b| b.transformer_layers_per_block)
+            .unwrap_or(1);
         let mid_config = UNetMidBlock2DCrossAttnConfig::new(bl_channels)
             .with_temb_channels(Some(time_embed_dim))
             .with_resnet_eps(self.norm_eps)
@@ -235,7 +250,8 @@ impl UNet2DConditionModelConfig {
             .with_cross_attn_dim(self.cross_attention_dim)
             .with_attn_num_head_channels(bl_attention_head_dim)
             .with_resnet_groups(Some(self.norm_num_groups))
-            .with_use_linear_projection(self.use_linear_projection);
+            .with_use_linear_projection(self.use_linear_projection)
+            .with_transformer_layers_per_block(bl_transformer_layers_per_block);
         let mid_block = mid_config.init(device);
 
         // Up blocks
@@ -284,7 +300,8 @@ impl UNet2DConditionModelConfig {
                     .with_attn_num_head_channels(attention_head_dim)
                     .with_cross_attention_dim(self.cross_attention_dim)
                     .with_sliced_attention_size(sliced_attention_size)
-                    .with_use_linear_projection(self.use_linear_projection);
+                    .with_use_linear_projection(self.use_linear_projection)
+                    .with_transformer_layers_per_block(block_config.transformer_layers_per_block);
                     UNetUpBlock::CrossAttn(config.init(device))
                 } else {
                     UNetUpBlock::Basic(ub_config.init(device))

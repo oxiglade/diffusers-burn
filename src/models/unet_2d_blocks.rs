@@ -408,7 +408,7 @@ impl UNetMidBlock2DCrossAttnConfig {
                 self.attn_num_head_channels,
                 self.in_channels / self.attn_num_head_channels,
             )
-            .with_depth(1)
+            .with_depth(self.transformer_layers_per_block)
             .with_n_groups(resnet_groups)
             .with_d_context(Some(self.cross_attn_dim))
             .with_sliced_attn_size(self.sliced_attention_size)
@@ -557,6 +557,8 @@ pub struct CrossAttnDownBlock2DConfig {
     pub sliced_attention_size: Option<usize>,
     #[config(default = false)]
     pub use_linear_projection: bool,
+    #[config(default = 1)]
+    pub transformer_layers_per_block: usize,
 }
 
 #[derive(Module, Debug)]
@@ -576,7 +578,7 @@ impl CrossAttnDownBlock2DConfig {
                     self.attn_num_head_channels,
                     self.out_channels / self.attn_num_head_channels,
                 )
-                .with_depth(1)
+                .with_depth(self.transformer_layers_per_block)
                 .with_d_context(Some(self.cross_attention_dim))
                 .with_n_groups(self.downblock.resnet_groups)
                 .with_sliced_attn_size(self.sliced_attention_size)
@@ -720,6 +722,8 @@ pub struct CrossAttnUpBlock2DConfig {
     pub sliced_attention_size: Option<usize>,
     #[config(default = false)]
     pub use_linear_projection: bool,
+    #[config(default = 1)]
+    pub transformer_layers_per_block: usize,
 }
 
 #[derive(Module, Debug)]
@@ -744,7 +748,7 @@ impl CrossAttnUpBlock2DConfig {
                     self.attn_num_head_channels,
                     self.out_channels / self.attn_num_head_channels,
                 )
-                .with_depth(1)
+                .with_depth(self.transformer_layers_per_block)
                 .with_d_context(Some(self.cross_attention_dim))
                 .with_n_groups(self.upblock.resnet_groups)
                 .with_sliced_attn_size(self.sliced_attention_size)
@@ -1004,5 +1008,31 @@ mod tests {
             "forward() output should match manual step-through (max_diff={})",
             diff
         );
+    }
+
+    #[test]
+    fn test_cross_attn_down_block_variable_depth() {
+        let device = Default::default();
+        TestBackend::seed(&device, 0);
+
+        let db_config = DownBlock2DConfig::new(32, 64)
+            .with_temb_channels(Some(128))
+            .with_n_layers(1)
+            .with_add_downsample(false);
+
+        let config = CrossAttnDownBlock2DConfig::new(32, 64, db_config)
+            .with_temb_channels(Some(128))
+            .with_attn_num_head_channels(8)
+            .with_cross_attention_dim(64)
+            .with_transformer_layers_per_block(3);
+
+        let block = config.init::<TestBackend>(&device);
+
+        let xs: Tensor<TestBackend, 4> = Tensor::random([1, 32, 16, 16], Distribution::Default, &device);
+        let temb: Tensor<TestBackend, 2> = Tensor::random([1, 128], Distribution::Default, &device);
+        let enc: Tensor<TestBackend, 3> = Tensor::random([1, 4, 64], Distribution::Default, &device);
+
+        let (output, _residuals) = block.forward(xs, Some(temb), Some(enc));
+        assert_eq!(output.shape(), Shape::new([1, 64, 16, 16]));
     }
 }
