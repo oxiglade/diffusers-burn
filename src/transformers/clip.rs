@@ -45,7 +45,7 @@ impl Activation {
 #[derive(Config, Debug)]
 pub struct ClipConfig {
     vocab_size: usize,
-    embed_dim: usize,       // aka config.hidden_size
+    pub embed_dim: usize,   // aka config.hidden_size
     activation: Activation, // aka config.hidden_act
     intermediate_size: usize,
     max_position_embeddings: usize,
@@ -283,7 +283,7 @@ impl<B: Backend> ClipMlp<B> {
 }
 
 #[derive(Module, Debug)]
-struct ClipEncoderLayer<B: Backend> {
+pub(crate) struct ClipEncoderLayer<B: Backend> {
     self_attn: ClipAttention<B>,
     layer_norm1: nn::LayerNorm<B>,
     mlp: ClipMlp<B>,
@@ -305,14 +305,27 @@ impl<B: Backend> ClipEncoderLayer<B> {
 }
 
 #[derive(Module, Debug)]
-struct ClipEncoder<B: Backend> {
-    layers: Vec<ClipEncoderLayer<B>>,
+pub(crate) struct ClipEncoder<B: Backend> {
+    pub(crate) layers: Vec<ClipEncoderLayer<B>>,
 }
 
 impl<B: Backend> ClipEncoder<B> {
     fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: Tensor<B, 4>) -> Tensor<B, 3> {
         let mut xs = xs;
         for layer in &self.layers {
+            xs = layer.forward(xs, causal_attention_mask.clone());
+        }
+        xs
+    }
+
+    fn forward_to_layer(
+        &self,
+        xs: Tensor<B, 3>,
+        causal_attention_mask: Tensor<B, 4>,
+        n: usize,
+    ) -> Tensor<B, 3> {
+        let mut xs = xs;
+        for layer in self.layers.iter().take(n) {
             xs = layer.forward(xs, causal_attention_mask.clone());
         }
         xs
@@ -352,6 +365,83 @@ impl<B: Backend> ClipTextTransformer<B> {
             Self::generate_causal_attention_mask(bsz, seq_len, &xs.device());
         let xs = self.encoder.forward(xs, causal_attention_mask);
         self.final_layer_norm.forward(xs)
+    }
+
+    /// Returns the penultimate encoder layer output without final_layer_norm.
+    /// Used by SDXL which extracts hidden_states[-2].
+    pub fn forward_penultimate(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
+        let [bsz, seq_len] = xs.dims();
+        let xs = self.embeddings.forward(xs);
+        let causal_attention_mask =
+            Self::generate_causal_attention_mask(bsz, seq_len, &xs.device());
+        let n_layers = self.encoder.layers.len();
+        self.encoder
+            .forward_to_layer(xs, causal_attention_mask, n_layers - 1)
+    }
+}
+
+/// Configuration for a CLIP text model with an additional linear projection layer.
+/// Used by SDXL's second text encoder to produce pooled embeddings.
+#[derive(Config, Debug)]
+pub struct CLIPTextModelWithProjectionConfig {
+    pub clip: ClipConfig,
+    pub projection_dim: usize,
+}
+
+impl CLIPTextModelWithProjectionConfig {
+    /// Returns a configuration for the SDXL second text encoder (OpenCLIP ViT-bigG).
+    pub fn sdxl2() -> Self {
+        Self {
+            clip: ClipConfig::sdxl2(),
+            projection_dim: 1280,
+        }
+    }
+
+    pub fn init<B: Backend>(&self, device: &B::Device) -> CLIPTextModelWithProjection<B> {
+        let transformer = self.clip.init_text_transformer(device);
+        let text_projection = nn::LinearConfig::new(self.clip.embed_dim, self.projection_dim)
+            .with_bias(false)
+            .init(device);
+        CLIPTextModelWithProjection {
+            transformer,
+            text_projection,
+        }
+    }
+}
+
+/// A CLIP text model with a linear projection on top of the pooled output.
+/// Produces both hidden states (from the penultimate layer) and pooled embeddings.
+#[derive(Module, Debug)]
+pub struct CLIPTextModelWithProjection<B: Backend> {
+    pub transformer: ClipTextTransformer<B>,
+    pub text_projection: nn::Linear<B>,
+}
+
+impl<B: Backend> CLIPTextModelWithProjection<B> {
+    /// Forward pass returning penultimate hidden states and pooled+projected embeddings.
+    ///
+    /// # Arguments
+    /// * `xs` - Token IDs [batch_size, seq_len]
+    ///
+    /// # Returns
+    /// * `hidden_states` - Penultimate layer output [batch_size, seq_len, embed_dim]
+    /// * `pooled` - Projected pooled output [batch_size, projection_dim]
+    pub fn forward(&self, xs: Tensor<B, 2, Int>) -> (Tensor<B, 3>, Tensor<B, 2>) {
+        let hidden_states = self.transformer.forward_penultimate(xs.clone());
+        let [_bsize, _seq_len, embed_dim] = hidden_states.dims();
+
+        // Pool from EOS token position (argmax of input_ids = EOS token)
+        let eos_indices = xs.argmax(1); // [batch, 1]
+        let gather_indices = eos_indices
+            .unsqueeze_dim(2) // [batch, 1, 1]
+            .repeat_dim(2, embed_dim); // [batch, 1, embed_dim]
+        let pooled: Tensor<B, 2> = hidden_states
+            .clone()
+            .gather(1, gather_indices) // [batch, 1, embed_dim]
+            .squeeze_dim(1); // [batch, embed_dim]
+        let pooled = self.text_projection.forward(pooled);
+
+        (hidden_states, pooled)
     }
 }
 
@@ -504,5 +594,35 @@ mod tests {
             ]),
             Tolerance::rel_abs(1e-4, 1e-4),
         );
+    }
+
+    #[test]
+    fn test_clip_forward_penultimate_differs_from_forward() {
+        let device = Default::default();
+        let config = ClipConfig::v1_5();
+        let clip = config.init_text_transformer::<TestBackend>(&device);
+
+        let tokens: Tensor<TestBackend, 2, Int> = Tensor::zeros([1, 77], &device);
+
+        let full_output = clip.forward(tokens.clone());
+        let penultimate = clip.forward_penultimate(tokens);
+
+        let diff: f32 = burn::prelude::ElementConversion::elem(
+            (full_output - penultimate).abs().max().into_scalar(),
+        );
+        assert!(diff > 0.0, "penultimate should differ from full forward");
+    }
+
+    #[test]
+    fn test_clip_with_projection_output_shapes() {
+        let device = Default::default();
+        let config = CLIPTextModelWithProjectionConfig::sdxl2();
+        let model = config.init::<TestBackend>(&device);
+
+        let tokens: Tensor<TestBackend, 2, Int> = Tensor::zeros([1, 77], &device);
+        let (hidden, pooled) = model.forward(tokens);
+
+        assert_eq!(hidden.dims(), [1, 77, 1280]);
+        assert_eq!(pooled.dims(), [1, 1280]);
     }
 }
