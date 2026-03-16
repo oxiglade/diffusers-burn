@@ -447,7 +447,7 @@ impl<B: Backend> UNetMidBlock2DCrossAttn<B> {
             let trans = block
                 .spatial_transformer
                 .forward(xs, encoder_hidden_states.clone());
-            xs = self.resnet.forward(trans, temb.clone());
+            xs = block.resnet_block.forward(trans, temb.clone());
         }
 
         xs
@@ -958,6 +958,51 @@ mod tests {
                 [[[0.80305]], [[0.363225]], [[0.7049]], [[0.507425]]],
             ]),
             Tolerance::rel_abs(1e-4, 1e-4),
+        );
+    }
+
+    /// Test that the mid block with multiple layers uses each attn_resnet pair's
+    /// own resnet_block rather than the initial resnet.
+    #[test]
+    fn test_mid_block_cross_attn_multi_layer() {
+        let device = Default::default();
+        TestBackend::seed(&device, 0);
+
+        let config = UNetMidBlock2DCrossAttnConfig::new(32)
+            .with_temb_channels(Some(128))
+            .with_resnet_groups(Some(32))
+            .with_attn_num_head_channels(8)
+            .with_cross_attn_dim(64)
+            .with_n_layers(2);
+
+        let mid_block = config.init::<TestBackend>(&device);
+
+        let xs: Tensor<TestBackend, 4> =
+            Tensor::random([1, 32, 8, 8], Distribution::Default, &device);
+        let temb: Tensor<TestBackend, 2> =
+            Tensor::random([1, 128], Distribution::Default, &device);
+        let enc: Tensor<TestBackend, 3> =
+            Tensor::random([1, 4, 64], Distribution::Default, &device);
+
+        let output = mid_block.forward(xs.clone(), Some(temb.clone()), Some(enc.clone()));
+        assert_eq!(output.shape(), Shape::new([1, 32, 8, 8]));
+
+        // Manually step through using each block's own resnet_block
+        let mut expected = mid_block.resnet.forward(xs, Some(temb.clone()));
+        for block in mid_block.attn_resnets.iter() {
+            let trans = block
+                .spatial_transformer
+                .forward(expected, Some(enc.clone()));
+            expected = block.resnet_block.forward(trans, Some(temb.clone()));
+        }
+
+        let diff: f32 = burn::prelude::ElementConversion::elem(
+            (output - expected).abs().max().into_scalar(),
+        );
+        assert!(
+            diff < 1e-6,
+            "forward() output should match manual step-through (max_diff={})",
+            diff
         );
     }
 }
