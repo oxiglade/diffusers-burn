@@ -379,8 +379,8 @@ mod tests {
         // Check overall mean matches
         let mean = result.mean().into_scalar();
         assert!(
-            (mean - 0.4999196529388428).abs() < 1e-4,
-            "Mean mismatch: actual={}, expected=0.4999196529388428",
+            (mean - 0.499_919_65).abs() < 1e-4,
+            "Mean mismatch: actual={}, expected=0.49991965",
             mean
         );
     }

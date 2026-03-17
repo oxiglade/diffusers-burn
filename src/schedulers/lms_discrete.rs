@@ -409,8 +409,8 @@ mod tests {
         let timesteps = scheduler.timesteps().to_vec();
 
         // Run several steps and check derivatives accumulation
-        for i in 0..6 {
-            let _ = scheduler.step(&model_output, timesteps[i], &sample);
+        for (i, &ts) in timesteps.iter().enumerate().take(6) {
+            let _ = scheduler.step(&model_output, ts, &sample);
             // Derivatives should accumulate up to order, then stay at order
             let expected_len = (i + 1).min(4);
             assert_eq!(

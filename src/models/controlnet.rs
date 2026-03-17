@@ -542,15 +542,15 @@ mod tests {
         // Down residual 0: shape=[1, 32, 32, 32], mean=51.52621078491211
         let mean0: f32 = down_residuals[0].clone().mean().into_scalar();
         assert!(
-            (mean0 - 51.526210).abs() < 0.1,
-            "Down residual 0 mean mismatch: actual={}, expected=51.526210",
+            (mean0 - 51.526_21).abs() < 0.1,
+            "Down residual 0 mean mismatch: actual={}, expected=51.52621",
             mean0
         );
 
         // Down residual 1: shape=[1, 32, 32, 32], mean=156.5426025390625
         let mean1: f32 = down_residuals[1].clone().mean().into_scalar();
         assert!(
-            (mean1 - 156.54260).abs() < 0.1,
+            (mean1 - 156.542_6).abs() < 0.1,
             "Down residual 1 mean mismatch: actual={}, expected=156.54260",
             mean1
         );

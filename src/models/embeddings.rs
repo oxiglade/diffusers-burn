@@ -82,8 +82,11 @@ pub fn get_timestep_embedding<B: Backend>(
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
+    #[allow(unused_imports)]
     use crate::TestBackend;
+    #[allow(unused_imports)]
     use burn::tensor::{Shape, TensorData, Tolerance};
 
     /// Test get_timestep_embedding with even channels - validated against diffusers-rs v0.3.1

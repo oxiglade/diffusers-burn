@@ -597,8 +597,8 @@ mod tests {
         // Check overall mean matches
         let mean = decoded.mean().into_scalar();
         assert!(
-            (mean - 0.09089245647192001).abs() < 1e-4,
-            "Mean mismatch: actual={}, expected=0.09089245647192001",
+            (mean - 0.090_892_46).abs() < 1e-4,
+            "Mean mismatch: actual={}, expected=0.09089246",
             mean
         );
     }
