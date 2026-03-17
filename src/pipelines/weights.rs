@@ -129,6 +129,11 @@ where
             "\\.mid_block\\.attentions\\.(\\d+)\\.",
             ".mid_block.attn_resnets.$1.attention_block.",
         ),
+        // VAE attention key remapping (SDXL VAE uses to_k/to_q/to_v/to_out.0)
+        ("\\.to_k\\.", ".key."),
+        ("\\.to_q\\.", ".query."),
+        ("\\.to_v\\.", ".value."),
+        ("\\.to_out\\.0\\.", ".proj_attn."),
         // Downsamplers: downsamplers.0 -> downsampler
         ("\\.downsamplers\\.0\\.", ".downsampler."),
         // Upsamplers: upsamplers.0 -> upsampler
@@ -334,6 +339,45 @@ where
         .with_from_adapter(PyTorchToBurnAdapter)
         .remap(remapper)
         .skip_enum_variants(true); // This is the key: skip enum variant names when matching paths
+
+    module
+        .load_from(&mut store)
+        .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
+
+    Ok(module)
+}
+
+/// Load CLIP text encoder with projection weights from HuggingFace format.
+///
+/// This is used for the SDXL second text encoder (CLIPTextModelWithProjection).
+/// The key remapping strips the `text_model.` prefix and remaps to `transformer.`
+/// since our struct wraps a `ClipTextTransformer` inside a `transformer` field.
+///
+/// Uses `PyTorchToBurnAdapter` to automatically handle:
+/// - Transposing linear layer weights
+/// - Renaming normalization parameters (weight->gamma, bias->beta)
+pub fn load_clip_with_projection_safetensors<B, M, P>(
+    mut module: M,
+    path: P,
+    _device: &B::Device,
+) -> Result<M, WeightLoadError>
+where
+    B: Backend,
+    M: ModuleSnapshot<B>,
+    P: AsRef<Path>,
+{
+    // Remap HuggingFace CLIP keys to our model structure
+    // The HF format has "text_model.embeddings...", "text_model.encoder..."
+    // Our CLIPTextModelWithProjection has a "transformer" field wrapping a ClipTextTransformer
+    let key_mappings: Vec<(&str, &str)> = vec![("^text_model\\.", "transformer.")];
+
+    let remapper = KeyRemapper::from_patterns(key_mappings)
+        .map_err(|e| WeightLoadError::SafetensorsLoad(e.to_string()))?;
+
+    let checkpoint_path = path.as_ref().to_path_buf();
+    let mut store = SafetensorsStore::from_file(checkpoint_path)
+        .with_from_adapter(PyTorchToBurnAdapter)
+        .remap(remapper);
 
     module
         .load_from(&mut store)

@@ -427,16 +427,18 @@ impl<B: Backend> CLIPTextModelWithProjection<B> {
     /// * `hidden_states` - Penultimate layer output [batch_size, seq_len, embed_dim]
     /// * `pooled` - Projected pooled output [batch_size, projection_dim]
     pub fn forward(&self, xs: Tensor<B, 2, Int>) -> (Tensor<B, 3>, Tensor<B, 2>) {
+        // Hidden states: penultimate layer (for cross-attention)
         let hidden_states = self.transformer.forward_penultimate(xs.clone());
-        let [_bsize, _seq_len, embed_dim] = hidden_states.dims();
 
-        // Pool from EOS token position (argmax of input_ids = EOS token)
+        // Pooled output: full forward (all layers + final_layer_norm), then EOS pooling + projection
+        let full_output = self.transformer.forward(xs.clone());
+        let [_bsize, _seq_len, embed_dim] = full_output.dims();
+
         let eos_indices = xs.argmax(1); // [batch, 1]
         let gather_indices = eos_indices
             .unsqueeze_dim(2) // [batch, 1, 1]
             .repeat_dim(2, embed_dim); // [batch, 1, embed_dim]
-        let pooled: Tensor<B, 2> = hidden_states
-            .clone()
+        let pooled: Tensor<B, 2> = full_output
             .gather(1, gather_indices) // [batch, 1, embed_dim]
             .squeeze_dim(1); // [batch, embed_dim]
         let pooled = self.text_projection.forward(pooled);

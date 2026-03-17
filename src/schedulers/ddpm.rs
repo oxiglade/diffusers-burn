@@ -13,9 +13,10 @@ use super::{betas_for_alpha_bar, BetaSchedule, PredictionType};
 use num_traits::Float;
 
 /// Variance type for DDPM scheduler.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DDPMVarianceType {
     /// Fixed small variance.
+    #[default]
     FixedSmall,
     /// Fixed small variance (log).
     FixedSmallLog,
@@ -25,12 +26,6 @@ pub enum DDPMVarianceType {
     FixedLargeLog,
     /// Learned variance.
     Learned,
-}
-
-impl Default for DDPMVarianceType {
-    fn default() -> Self {
-        Self::FixedSmall
-    }
 }
 
 /// Configuration for the DDPM Scheduler.

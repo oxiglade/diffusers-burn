@@ -64,7 +64,10 @@ impl BlockConfig {
     }
 
     /// Set the number of transformer layers per block.
-    pub fn with_transformer_layers_per_block(mut self, transformer_layers_per_block: usize) -> Self {
+    pub fn with_transformer_layers_per_block(
+        mut self,
+        transformer_layers_per_block: usize,
+    ) -> Self {
         self.transformer_layers_per_block = transformer_layers_per_block;
         self
     }
@@ -211,7 +214,10 @@ impl UNet2DConditionModelConfig {
         let time_embedding = TimestepEmbeddingConfig::new(b_channels, time_embed_dim).init(device);
 
         // Addition embedding for SDXL
-        let add_embedding = match (self.addition_time_embed_dim, self.projection_class_embeddings_input_dim) {
+        let add_embedding = match (
+            self.addition_time_embed_dim,
+            self.projection_class_embeddings_input_dim,
+        ) {
             (Some(_), Some(input_dim)) => {
                 Some(TimestepEmbeddingConfig::new(input_dim, time_embed_dim).init(device))
             }
@@ -252,7 +258,9 @@ impl UNet2DConditionModelConfig {
                         .with_cross_attention_dim(self.cross_attention_dim)
                         .with_sliced_attention_size(sliced_attention_size)
                         .with_use_linear_projection(self.use_linear_projection)
-                        .with_transformer_layers_per_block(block_config.transformer_layers_per_block);
+                        .with_transformer_layers_per_block(
+                            block_config.transformer_layers_per_block,
+                        );
                     UNetDownBlock::CrossAttn(config.init(device))
                 } else {
                     UNetDownBlock::Basic(db_config.init(device))
@@ -261,7 +269,9 @@ impl UNet2DConditionModelConfig {
             .collect();
 
         // Mid block
-        let bl_transformer_layers_per_block = self.blocks.iter()
+        let bl_transformer_layers_per_block = self
+            .blocks
+            .iter()
             .rev()
             .find(|b| b.use_cross_attn)
             .map(|b| b.transformer_layers_per_block)
@@ -372,7 +382,14 @@ impl<B: Backend> UNet2DConditionModel<B> {
         timestep: f64,
         encoder_hidden_states: Tensor<B, 3>,
     ) -> Tensor<B, 4> {
-        self.forward_with_additional_residuals(xs, timestep, encoder_hidden_states, None, None, None)
+        self.forward_with_additional_residuals(
+            xs,
+            timestep,
+            encoder_hidden_states,
+            None,
+            None,
+            None,
+        )
     }
 
     /// Forward pass with additional residuals (for ControlNet support).
@@ -411,9 +428,11 @@ impl<B: Backend> UNet2DConditionModel<B> {
         let mut emb = self.time_embedding.forward(emb);
 
         // Augmented embedding for SDXL
-        if let (Some(ref add_emb), Some(added_cond), Some(atd)) =
-            (&self.add_embedding, added_cond_kwargs, self.addition_time_embed_dim)
-        {
+        if let (Some(ref add_emb), Some(added_cond), Some(atd)) = (
+            &self.add_embedding,
+            added_cond_kwargs,
+            self.addition_time_embed_dim,
+        ) {
             let [bsize_cond, _] = added_cond.text_embeds.dims();
             let time_embeds = get_timestep_embedding(
                 added_cond.time_ids.clone().flatten::<1>(0, 1),

@@ -983,8 +983,7 @@ mod tests {
 
         let xs: Tensor<TestBackend, 4> =
             Tensor::random([1, 32, 8, 8], Distribution::Default, &device);
-        let temb: Tensor<TestBackend, 2> =
-            Tensor::random([1, 128], Distribution::Default, &device);
+        let temb: Tensor<TestBackend, 2> = Tensor::random([1, 128], Distribution::Default, &device);
         let enc: Tensor<TestBackend, 3> =
             Tensor::random([1, 4, 64], Distribution::Default, &device);
 
@@ -1000,9 +999,8 @@ mod tests {
             expected = block.resnet_block.forward(trans, Some(temb.clone()));
         }
 
-        let diff: f32 = burn::prelude::ElementConversion::elem(
-            (output - expected).abs().max().into_scalar(),
-        );
+        let diff: f32 =
+            burn::prelude::ElementConversion::elem((output - expected).abs().max().into_scalar());
         assert!(
             diff < 1e-6,
             "forward() output should match manual step-through (max_diff={})",
@@ -1028,9 +1026,11 @@ mod tests {
 
         let block = config.init::<TestBackend>(&device);
 
-        let xs: Tensor<TestBackend, 4> = Tensor::random([1, 32, 16, 16], Distribution::Default, &device);
+        let xs: Tensor<TestBackend, 4> =
+            Tensor::random([1, 32, 16, 16], Distribution::Default, &device);
         let temb: Tensor<TestBackend, 2> = Tensor::random([1, 128], Distribution::Default, &device);
-        let enc: Tensor<TestBackend, 3> = Tensor::random([1, 4, 64], Distribution::Default, &device);
+        let enc: Tensor<TestBackend, 3> =
+            Tensor::random([1, 4, 64], Distribution::Default, &device);
 
         let (output, _residuals) = block.forward(xs, Some(temb), Some(enc));
         assert_eq!(output.shape(), Shape::new([1, 64, 16, 16]));

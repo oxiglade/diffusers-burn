@@ -23,8 +23,12 @@ use diffusers_burn::pipelines::stable_diffusion::{
     generate_image_ddim, generate_image_heun, generate_image_kdpm2, generate_image_kdpm2_ancestral,
     generate_image_lms, StableDiffusion, StableDiffusionConfig,
 };
+use diffusers_burn::pipelines::stable_diffusion_xl::{
+    generate_image_sdxl_ddim, StableDiffusionXL, StableDiffusionXLConfig,
+};
 use diffusers_burn::pipelines::weights::{
-    load_clip_safetensors, load_unet_safetensors, load_vae_safetensors,
+    load_clip_safetensors, load_clip_with_projection_safetensors, load_unet_safetensors,
+    load_vae_safetensors,
 };
 use diffusers_burn::transformers::{SimpleTokenizer, SimpleTokenizerConfig};
 
@@ -45,6 +49,8 @@ enum StableDiffusionVersion {
     V1_5,
     #[value(name = "v2-1")]
     V2_1,
+    #[value(name = "xl")]
+    Xl,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
@@ -66,26 +72,24 @@ impl StableDiffusionVersion {
     fn repo_id(&self) -> &'static str {
         match self {
             StableDiffusionVersion::V1_5 => "runwayml/stable-diffusion-v1-5",
-            // Use community repo (ungated) instead of stabilityai/stable-diffusion-2-1 (gated)
             StableDiffusionVersion::V2_1 => "sd2-community/stable-diffusion-2-1",
+            StableDiffusionVersion::Xl => "stabilityai/stable-diffusion-xl-base-1.0",
         }
     }
 
     fn clip_repo_id(&self) -> &'static str {
         match self {
-            // SD 1.5 uses OpenAI's CLIP
             StableDiffusionVersion::V1_5 => "openai/clip-vit-large-patch14",
-            // SD 2.1 community repo has CLIP in text_encoder subdirectory
             StableDiffusionVersion::V2_1 => "sd2-community/stable-diffusion-2-1",
+            StableDiffusionVersion::Xl => "stabilityai/stable-diffusion-xl-base-1.0",
         }
     }
 
     fn clip_weights_file(&self) -> &'static str {
         match self {
-            // SD 1.5 uses standalone CLIP model
             StableDiffusionVersion::V1_5 => "model.safetensors",
-            // SD 2.1 has CLIP in text_encoder subdirectory
             StableDiffusionVersion::V2_1 => "text_encoder/model.safetensors",
+            StableDiffusionVersion::Xl => "text_encoder/model.safetensors",
         }
     }
 
@@ -93,7 +97,12 @@ impl StableDiffusionVersion {
         match self {
             StableDiffusionVersion::V1_5 => SimpleTokenizerConfig::v1_5(),
             StableDiffusionVersion::V2_1 => SimpleTokenizerConfig::v2_1(),
+            StableDiffusionVersion::Xl => SimpleTokenizerConfig::v1_5(),
         }
+    }
+
+    fn is_xl(&self) -> bool {
+        matches!(self, StableDiffusionVersion::Xl)
     }
 }
 
@@ -247,15 +256,10 @@ fn tensor_to_image(tensor: Tensor<Backend, 4>) -> image::RgbImage {
     for y in 0..height {
         for x in 0..width {
             // Round and clamp to [0, 255] for proper u8 conversion (matches PyTorch's to_kind(Uint8))
-            let r = data[0 * height * width + y * width + x]
-                .round()
-                .clamp(0.0, 255.0) as u8;
-            let g = data[1 * height * width + y * width + x]
-                .round()
-                .clamp(0.0, 255.0) as u8;
-            let b = data[2 * height * width + y * width + x]
-                .round()
-                .clamp(0.0, 255.0) as u8;
+            let hw = height * width;
+            let r = data[y * width + x].round().clamp(0.0, 255.0) as u8;
+            let g = data[hw + y * width + x].round().clamp(0.0, 255.0) as u8;
+            let b = data[2 * hw + y * width + x].round().clamp(0.0, 255.0) as u8;
             img.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
         }
     }
@@ -263,7 +267,95 @@ fn tensor_to_image(tensor: Tensor<Backend, 4>) -> image::RgbImage {
     img
 }
 
+fn run_sdxl(args: Args) -> anyhow::Result<()> {
+    let device = Default::default();
+
+    println!("Building SDXL configuration...");
+    let config = StableDiffusionXLConfig::xl(args.height, args.width);
+
+    let vocab_path = match &args.vocab_file {
+        Some(path) => PathBuf::from(path),
+        None => download_bpe_vocab()?,
+    };
+
+    // SDXL uses two tokenizers: encoder 1 pads with EOS, encoder 2 pads with "!" (token 0)
+    let tokenizer_1 = SimpleTokenizer::new(&vocab_path, SimpleTokenizerConfig::v1_5())?;
+    let tokenizer_2 = SimpleTokenizer::new(&vocab_path, SimpleTokenizerConfig::v2_1())?;
+
+    println!("Tokenizing prompt: \"{}\"", args.prompt);
+    let tokens = tokenizer_1.encode(&args.prompt)?;
+    let tokens_2 = tokenizer_2.encode(&args.prompt)?;
+
+    let hf_token = args.hf_token.as_deref();
+    let repo = args.sd_version.repo_id();
+
+    println!("\nPreparing model weights...");
+    let clip1_path = download_hf_file(repo, "text_encoder/model.safetensors", hf_token)?;
+    let clip2_path = download_hf_file(repo, "text_encoder_2/model.safetensors", hf_token)?;
+    let vae_path = download_hf_file(repo, "vae/diffusion_pytorch_model.safetensors", hf_token)?;
+    let unet_path = download_hf_file(repo, "unet/diffusion_pytorch_model.safetensors", hf_token)?;
+
+    println!("\nBuilding and loading models...");
+    let clip = load_clip_safetensors::<Backend, _, _>(
+        config.build_clip_transformer::<Backend>(&device),
+        &clip1_path,
+        &device,
+    )?;
+    let clip_with_proj = load_clip_with_projection_safetensors::<Backend, _, _>(
+        config.build_clip_with_projection::<Backend>(&device),
+        &clip2_path,
+        &device,
+    )?;
+    let vae = load_vae_safetensors::<Backend, _, _>(
+        config.build_vae::<Backend>(&device),
+        &vae_path,
+        &device,
+    )?;
+    let unet = load_unet_safetensors::<Backend, _, _>(
+        config.build_unet::<Backend>(&device, 4),
+        &unet_path,
+        &device,
+    )?;
+
+    let pipeline = StableDiffusionXL {
+        clip,
+        clip_with_proj,
+        vae,
+        unet,
+        width: config.width,
+        height: config.height,
+    };
+
+    println!("\nGenerating image...");
+    println!("  Size: {}x{}", config.width, config.height);
+    println!("  Steps: {}", args.n_steps);
+    println!("  Guidance scale: {}", GUIDANCE_SCALE);
+    println!("  Seed: {}", args.seed);
+
+    let scheduler = config.build_ddim_scheduler::<Backend>(args.n_steps, &device);
+    let image_tensor = generate_image_sdxl_ddim(
+        &pipeline,
+        &scheduler,
+        &tokens,
+        &tokens_2,
+        GUIDANCE_SCALE,
+        args.seed,
+        &device,
+    );
+
+    println!("\nSaving image to {}...", args.output);
+    let img = tensor_to_image(image_tensor);
+    img.save(&args.output)?;
+
+    println!("Done!");
+    Ok(())
+}
+
 fn run(args: Args) -> anyhow::Result<()> {
+    if args.sd_version.is_xl() {
+        return run_sdxl(args);
+    }
+
     let device = Default::default();
 
     // Build configuration
@@ -271,6 +363,7 @@ fn run(args: Args) -> anyhow::Result<()> {
     let sd_config = match args.sd_version {
         StableDiffusionVersion::V1_5 => StableDiffusionConfig::v1_5(None, args.height, args.width),
         StableDiffusionVersion::V2_1 => StableDiffusionConfig::v2_1(None, args.height, args.width),
+        StableDiffusionVersion::Xl => unreachable!(),
     };
 
     // Download or use provided vocab file
