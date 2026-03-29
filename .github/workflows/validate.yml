@@ -25,7 +25,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [blaze/macos-14, ubuntu-latest, windows-latest]
+        os: [blaze/macos-14, blaze/ubuntu-latest, windows-latest]
         rust: [stable]
         backend: ["ndarray", "wgpu", "torch"]
         include:
@@ -34,9 +34,6 @@ jobs:
         exclude:
           # windows can have CPU Vulkan but Burn doesn't select CPU well yet
           - os: windows-latest
-            backend: "wgpu"
-          # ubuntu is throwing SIGSEGV
-          - os: ubuntu-latest
             backend: "wgpu"
     steps:
       - name: Checkout
